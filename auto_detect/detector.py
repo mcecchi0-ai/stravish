@@ -36,7 +36,7 @@ class DetectedSegment:
         if not self.name:
             direction = "↑" if self.type == "climb" else "↓" if self.type == "descent" else "→"
             self.name = (
-                f"[auto] {direction} {self.avg_grade_pct:.1f}% "
+                f"{direction} {self.avg_grade_pct:.1f}% "
                 f"{self.distance_m:.0f}m +{self.elevation_gain_m:.0f}m"
             )
 
