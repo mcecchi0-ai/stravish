@@ -12,6 +12,7 @@ Endpoints:
 
 import sys
 import os
+import re
 import logging
 import threading
 import webbrowser
@@ -36,6 +37,89 @@ from cache.db import SegmentCache
 from strava.auth import StravaAuth
 
 logger = logging.getLogger(__name__)
+
+
+def _idx_overlap_ratio(a_start, a_end, b_start, b_end):
+    try:
+        a0, a1 = int(a_start), int(a_end)
+        b0, b1 = int(b_start), int(b_end)
+    except Exception:
+        return 0.0
+    if a1 < a0:
+        a0, a1 = a1, a0
+    if b1 < b0:
+        b0, b1 = b1, b0
+    inter = min(a1, b1) - max(a0, b0)
+    if inter <= 0:
+        return 0.0
+    lena = max(1, a1 - a0)
+    lenb = max(1, b1 - b0)
+    return inter / float(min(lena, lenb))
+
+
+def _effort_is_equivalent(a, b):
+    ov = _idx_overlap_ratio(a.get("start_idx"), a.get("end_idx"), b.get("start_idx"), b.get("end_idx"))
+    if ov < 0.85:
+        return False
+    ad = float(a.get("distance_m") or 0.0)
+    bd = float(b.get("distance_m") or 0.0)
+    if ad > 0 and bd > 0:
+        dist_delta = abs(ad - bd) / max(ad, bd)
+        if dist_delta > 0.35:
+            return False
+    ae = float(a.get("elapsed_seconds") or 0.0)
+    be = float(b.get("elapsed_seconds") or 0.0)
+    if ae > 0 and be > 0:
+        t_delta = abs(ae - be) / max(ae, be)
+        if t_delta > 0.50:
+            return False
+    return True
+
+
+def _source_rank(source):
+    # Preferenza: Strava API > historical > frechet > auto
+    return {
+        "strava_api": 4,
+        "historical": 3,
+        "frechet": 2,
+        "auto": 1,
+    }.get(source or "", 0)
+
+
+def _get_effective_efforts_for_activity(activity_id):
+    """Deduplica gli effort dell'attività preferendo match Strava stabili."""
+    raw = get_cache().get_efforts_for_activity(activity_id)
+    if not raw:
+        return []
+
+    ordered = sorted(
+        raw,
+        key=lambda e: (
+            -_source_rank(e.get("source")),
+            -(float(e.get("distance_m") or 0.0)),
+            float(e.get("frechet_distance_m") or 0.0),
+            int(e.get("effort_id") or 0),
+        )
+    )
+
+    kept = []
+    for cand in ordered:
+        replaced = False
+        skip = False
+        for i, cur in enumerate(kept):
+            if not _effort_is_equivalent(cand, cur):
+                continue
+            if _source_rank(cand.get("source")) > _source_rank(cur.get("source")):
+                kept[i] = cand
+                replaced = True
+            else:
+                skip = True
+            break
+        if not skip and not replaced:
+            kept.append(cand)
+
+    kept.sort(key=lambda e: (float(e.get("start_time_s") or 9e18), int(e.get("effort_id") or 0)))
+    return kept
 
 # ── Log stream per SSE ────────────────────────────────────────────
 import queue as _queue
@@ -112,6 +196,120 @@ def _to_seconds(duration) -> int:
         return int(duration.total_seconds())
     return int(duration)  # stravalib Duration è già in secondi
 
+
+
+
+def _interval_uncovered_fraction(start_idx, end_idx, covered):
+    try:
+        a = int(start_idx)
+        b = int(end_idx)
+    except Exception:
+        return 1.0
+    if b < a:
+        a, b = b, a
+    total = max(1, b - a)
+
+    overlap = 0
+    for c0, c1 in covered:
+        if c1 <= a or c0 >= b:
+            continue
+        overlap += max(0, min(b, c1) - max(a, c0))
+    overlap = min(overlap, total)
+    return max(0.0, min(1.0, 1.0 - (overlap / float(total))))
+
+
+def _merge_interval(covered, start_idx, end_idx):
+    try:
+        a = int(start_idx)
+        b = int(end_idx)
+    except Exception:
+        return
+    if b < a:
+        a, b = b, a
+    if a == b:
+        b = a + 1
+
+    out = []
+    inserted = False
+    for c0, c1 in covered:
+        if c1 < a:
+            out.append((c0, c1))
+        elif b < c0:
+            if not inserted:
+                out.append((a, b))
+                inserted = True
+            out.append((c0, c1))
+        else:
+            a = min(a, c0)
+            b = max(b, c1)
+    if not inserted:
+        out.append((a, b))
+    covered[:] = out
+
+
+def _recompute_activity_summary_from_efforts(activity_id):
+    """Ricalcola summary da effort presenti nel DB (senza GPX/Strava)."""
+    efforts = _get_effective_efforts_for_activity(activity_id)
+    if not efforts:
+        get_cache().update_activity_totals(activity_id, 0.0, 0.0)
+        return {"total_distance_m": 0.0, "total_elevation_m": 0.0, "moving_time_s": 0}
+
+    ordered = sorted(
+        efforts,
+        key=lambda e: (
+            -_source_rank(e.get("source")),
+            -(float(e.get("distance_m") or 0.0)),
+            int(e.get("start_idx") or 0),
+        )
+    )
+
+    covered = []
+    total_dist = 0.0
+    total_elev = 0.0
+    total_time = 0.0
+
+    for e in ordered:
+        frac = _interval_uncovered_fraction(e.get("start_idx"), e.get("end_idx"), covered)
+        if frac <= 0:
+            continue
+
+        dist = float(e.get("distance_m") or 0.0) * frac
+        secs = float(e.get("elapsed_seconds") or 0.0) * frac
+        elev = float(e.get("elev_gain_m") or 0.0) * frac
+        if elev <= 0:
+            grade = float(e.get("avg_grade_pct") or 0.0)
+            elev = max(0.0, (grade / 100.0) * dist)
+
+        total_dist += dist
+        total_time += secs
+        total_elev += elev
+        _merge_interval(covered, e.get("start_idx"), e.get("end_idx"))
+
+    get_cache().update_activity_totals(activity_id, total_dist, total_elev)
+    if total_time > 0:
+        get_cache().update_activity_meta(activity_id, moving_time_s=int(round(total_time)))
+
+    return {
+        "total_distance_m": total_dist,
+        "total_elevation_m": total_elev,
+        "moving_time_s": int(round(total_time)),
+    }
+def _persist_gpx_payload(filename_hint: str, payload: bytes) -> str:
+    """Salva un GPX in cache/imported_gpx e ritorna path persistente."""
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", filename_hint or "activity")
+    if not safe.lower().endswith(".gpx"):
+        safe += ".gpx"
+    root = Path(_config.get("cache", {}).get("db_path", "./cache/segments.db")).parent
+    out_dir = root / "imported_gpx"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / safe
+    idx = 1
+    while target.exists():
+        target = out_dir / f"{Path(safe).stem}_{idx}.gpx"
+        idx += 1
+    target.write_bytes(payload)
+    return str(target)
+
 app = Flask(__name__, static_folder=str(Path(__file__).parent), static_url_path="")
 
 _cache = None
@@ -156,32 +354,19 @@ def api_status():
 @app.route("/api/activities")
 def api_activities():
     activities = get_cache().get_all_activities()
-    c = get_cache()._conn
-    # Conta effort totali, Strava e auto separatamente
-    all_counts    = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts GROUP BY activity_id"
-    ).fetchall()}
-    strava_counts = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts WHERE source='strava_api' GROUP BY activity_id"
-    ).fetchall()}
-    auto_counts   = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts WHERE source='auto' GROUP BY activity_id"
-    ).fetchall()}
-    hist_counts   = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts WHERE source='historical' GROUP BY activity_id"
-    ).fetchall()}
     for a in activities:
         aid = a["activity_id"]
-        a["effort_count"]           = all_counts.get(aid, 0)
-        a["strava_effort_count"]    = strava_counts.get(aid, 0)
-        a["auto_effort_count"]      = auto_counts.get(aid, 0)
-        a["historical_effort_count"]= hist_counts.get(aid, 0)
+        effective = _get_effective_efforts_for_activity(aid)
+        a["effort_count"] = len(effective)
+        a["strava_effort_count"] = sum(1 for e in effective if e.get("source") == "strava_api")
+        a["auto_effort_count"] = sum(1 for e in effective if e.get("source") == "auto")
+        a["historical_effort_count"] = sum(1 for e in effective if e.get("source") == "historical")
     return jsonify(activities)
 
 
 @app.route("/api/activities/<int:activity_id>/efforts")
 def api_activity_efforts(activity_id):
-    efforts = get_cache().get_efforts_for_activity(activity_id)
+    efforts = _get_effective_efforts_for_activity(activity_id)
     row = get_cache()._conn.execute(
         "SELECT num_points FROM activities WHERE activity_id=?", (activity_id,)
     ).fetchone()
@@ -350,7 +535,7 @@ def api_activity_summary(activity_id):
 def api_activity_medals(activity_id):
     """Restituisce le medaglie (top-3 per segmento) per questa attività."""
     cache = get_cache()
-    efforts = cache.get_efforts_for_activity(activity_id)
+    efforts = _get_effective_efforts_for_activity(activity_id)
     medals = []
     for effort in efforts:
         seg_id = effort["segment_id"]
@@ -411,6 +596,72 @@ def api_refresh_meta(activity_id):
         _save_strava_meta(get_cache(), activity_id, act_meta)
         return jsonify({"ok": True})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/activities/<int:activity_id>/refresh", methods=["POST"])
+def api_refresh_activity(activity_id):
+    """Ricalcola aggregati/segmentizzazione da GPX locale, poi aggiorna Strava."""
+    from segmentizer.pipeline import Segmentizer
+    from strava.client import StravaClient
+    from strava.efforts import fetch_and_store_strava_efforts
+
+    data = request.get_json(silent=True) or {}
+    activity_type = data.get("activity_type", "cycling")
+
+    row = get_cache()._conn.execute(
+        """SELECT activity_id, filename, strava_activity_id, gpx_path
+           FROM activities WHERE activity_id=?""",
+        (activity_id,)
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "Attività non trovata"}), 404
+
+    gpx_path = row["gpx_path"]
+    if not gpx_path or not Path(gpx_path).exists():
+        stats = _recompute_activity_summary_from_efforts(activity_id)
+        return jsonify({
+            "ok": True,
+            "activity_id": activity_id,
+            "mode": "efforts_only",
+            "warning": "GPX sorgente non disponibile: summary ricalcolato dagli effort presenti nel DB.",
+            "gpx_stats": stats,
+            "strava_efforts": 0,
+        })
+
+    # Reset effort esistenti per ricalcolo pulito
+    get_cache().delete_efforts_for_activity(activity_id)
+
+    try:
+        seg = Segmentizer(config=_config)
+        r = seg.process(
+            gpx_path,
+            activity_type=activity_type,
+            filename_override=row["filename"],
+            strava_activity_id=row["strava_activity_id"],
+        )
+
+        strava_saved = 0
+        if row["strava_activity_id"]:
+            strava = StravaClient(_config, get_cache())
+            strava_saved = fetch_and_store_strava_efforts(
+                strava, get_cache(), activity_id, int(row["strava_activity_id"])
+            )
+            try:
+                act_meta = _get_fresh_client().get_activity(int(row["strava_activity_id"]))
+                _save_strava_meta(get_cache(), activity_id, act_meta)
+            except Exception as ex:
+                logger.warning(f"refresh meta Strava fallito: {ex}")
+
+        return jsonify({
+            "ok": True,
+            "activity_id": activity_id,
+            "segments_matched": len(r.get("segments_matched", [])),
+            "strava_efforts": strava_saved,
+            "gpx_stats": r.get("gpx_stats", {}),
+        })
+    except Exception as e:
+        logger.error("api_refresh_activity error: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -767,13 +1018,11 @@ def api_import():
 
     seg = Segmentizer(config=_config)
 
-    import tempfile
     for f in files:
-        with tempfile.NamedTemporaryFile(suffix=".gpx", delete=False) as tmp:
-            f.save(tmp.name)
-            tmp_path = tmp.name
         try:
-            r = seg.process(tmp_path, activity_type=request.form.get("type", "cycling"))
+            payload = f.read()
+            src_path = _persist_gpx_payload(f.filename or "upload.gpx", payload)
+            r = seg.process(src_path, activity_type=request.form.get("type", "cycling"))
             matched = r["segments_matched"]
             result = {
                 "filename": f.filename,
@@ -800,8 +1049,6 @@ def api_import():
             results.append(result)
         except Exception as e:
             results.append({"filename": f.filename, "error": str(e)})
-        finally:
-            os.unlink(tmp_path)
 
     return jsonify(results)
 
@@ -815,7 +1062,7 @@ def api_strava_import_activity():
     2. Importa GPX via pipeline (fetch segmenti + matching Fréchet)
     3. Fetcha effort da API Strava (i 68 esatti)
     """
-    import traceback, tempfile, os as _os
+    import traceback
     from strava.auth import StravaAuth as _Auth
     from stravalib.client import Client
     from stravalib.util.limiter import DefaultRateLimiter
@@ -855,18 +1102,11 @@ def api_strava_import_activity():
         safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in act_name)
         filename  = f"strava_{strava_activity_id}_{safe_name[:40]}.gpx"
 
-        with tempfile.NamedTemporaryFile(suffix=".gpx", delete=False,
-                                          mode="w", encoding="utf-8") as tmp:
-            tmp.write(gpx_content)
-            tmp_path = tmp.name
-
-        try:
-            seg = Segmentizer(config=_config)
-            r = seg.process(tmp_path, activity_type=activity_type,
-                            filename_override=filename,
-                            strava_activity_id=strava_activity_id)
-        finally:
-            _os.unlink(tmp_path)
+        src_path = _persist_gpx_payload(filename, gpx_content.encode("utf-8"))
+        seg = Segmentizer(config=_config)
+        r = seg.process(src_path, activity_type=activity_type,
+                        filename_override=filename,
+                        strava_activity_id=strava_activity_id)
 
         activity_id = r["activity_id"]
 

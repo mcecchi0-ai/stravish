@@ -112,8 +112,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   .sync-log-row.done{color:var(--green)}
   .sync-log-row.error{color:var(--orange)}
   .act-delete{margin-left:6px;opacity:0;cursor:pointer;font-size:11px;transition:opacity .15s;user-select:none}
+  .act-refresh{margin-left:6px;opacity:0;cursor:pointer;font-size:11px;transition:opacity .15s;user-select:none}
   .act-item:hover .act-delete{opacity:.5}
+  .act-item:hover .act-refresh{opacity:.5}
   .act-item:hover .act-delete:hover{opacity:1}
+  .act-item:hover .act-refresh:hover{opacity:1}
   .tree-seg-vam{font-size:10px;font-weight:600;color:var(--orange);background:rgba(252,76,2,.12);border-radius:3px;padding:1px 4px;margin-left:5px}
   #log-drawer{position:fixed;bottom:0;left:0;right:0;height:220px;background:var(--bg);border-top:1px solid var(--border);display:flex;flex-direction:column;transform:translateY(100%);transition:transform .2s ease;z-index:1500}
   #log-drawer.open{transform:translateY(0)}
@@ -634,6 +637,7 @@ function renderActivities() {
         ${a.effort_count>0 ? `<span class="act-expand ${a.activity_id===currentActivityId?'open':''}" data-expand="${a.activity_id}">▶</span>` : ''}
       </div>
       <div class="act-meta">${date} · ${dist} km · +${ele} m
+        <span class="act-refresh" data-id="${a.activity_id}" title="Ricalcola aggregati e segmentizzazione">🔄</span>
         <span class="act-delete" data-id="${a.activity_id}" title="Elimina attività">🗑</span>
       </div>
       ${segBadge}
@@ -1203,6 +1207,34 @@ document.getElementById('act-list').addEventListener('click', async e => {
   clearMapLayers();
   await Promise.all([loadStatus(), loadActivities()]);
 }, true); // capture=true per intercettare prima del listener selectActivity
+
+// .act-refresh → ricalcola aggregati + segmentizzazione (cache-first, poi Strava)
+document.getElementById('act-list').addEventListener('click', async e => {
+  const btn = e.target.closest('.act-refresh');
+  if (!btn) return;
+  e.stopPropagation();
+  const id = +btn.dataset.id;
+  const act = allActivities.find(a => a.activity_id === id);
+  const name = act ? (act.activity_name || act.filename) : `#${id}`;
+  if (!confirm(`Ricalcolare aggregati e segmentizzazione per "${name}"?`)) return;
+  const old = btn.textContent;
+  btn.textContent = '⏳';
+  try {
+    await api(`/api/activities/${id}/refresh`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({activity_type:'cycling'})
+    });
+    await Promise.all([loadStatus(), loadActivities()]);
+    if (currentActivityId === id) {
+      await selectActivity(id, true);
+    }
+  } catch(err) {
+    alert(`Refresh fallito: ${err.message}`);
+  } finally {
+    btn.textContent = old;
+  }
+}, true);
 
 document.getElementById('right-close').addEventListener('click', () => {
   document.getElementById('right').classList.remove('open');
