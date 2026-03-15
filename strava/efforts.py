@@ -55,9 +55,10 @@ def fetch_and_store_strava_efforts(strava_client, cache: SegmentCache,
     if not raw_efforts:
         logger.warning("Nessun effort — verifica scope activity:read_all e segmenti starred")
 
-    # Cancella solo effort Fréchet locali
+    # Refresh idempotente: ricarica solo gli effort Strava, preservando i match locali.
+    # In UI i match locali hanno priorità rispetto ai corrispettivi Strava.
     cache._conn.execute(
-        "DELETE FROM efforts WHERE activity_id=? AND source='frechet'",
+        "DELETE FROM efforts WHERE activity_id=? AND source='strava_api'",
         (activity_id,)
     )
     cache._conn.commit()

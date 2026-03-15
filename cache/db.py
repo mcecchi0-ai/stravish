@@ -300,6 +300,25 @@ class SegmentCache:
         )
         self._conn.commit()
 
+    def update_activity_totals(self, activity_id, total_distance_m=None, total_elevation_m=None):
+        """Aggiorna distanza/dislivello totale dell'attività."""
+        updates = []
+        values = []
+        if total_distance_m is not None:
+            updates.append("total_distance_m=?")
+            values.append(float(total_distance_m))
+        if total_elevation_m is not None:
+            updates.append("total_elevation_m=?")
+            values.append(float(total_elevation_m))
+        if not updates:
+            return
+        values.append(activity_id)
+        self._conn.execute(
+            f"UPDATE activities SET {', '.join(updates)} WHERE activity_id=?",
+            tuple(values)
+        )
+        self._conn.commit()
+
     # --- Settings ---
 
     def get_setting(self, key, default=None):
@@ -418,7 +437,26 @@ class SegmentCache:
                  e.effort_id ASC""",
             (activity_id,)
         ).fetchall()
-        return [dict(r) for r in rows]
+
+        # Priorità sorgenti per stesso segmento nella stessa attività:
+        # locale (historical/auto/frechet) > strava_api.
+        raw = [dict(r) for r in rows]
+        local_sources = {"historical", "auto", "frechet"}
+        has_local_for_segment = {
+            r["segment_id"]
+            for r in raw
+            if (r.get("source") in local_sources)
+        }
+
+        filtered = []
+        for r in raw:
+            if r.get("source") == "strava_api" and r["segment_id"] in has_local_for_segment:
+                continue
+            r["is_local_override"] = (
+                r.get("source") in local_sources and r["segment_id"] in has_local_for_segment
+            )
+            filtered.append(r)
+        return filtered
 
     @staticmethod
     def _row_to_segment(row):
