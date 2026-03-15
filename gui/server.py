@@ -271,63 +271,12 @@ def api_activity_efforts(activity_id):
     ).fetchone()
     total_points = row["num_points"] if row else None
 
-    # Normalizza naming segmenti auto: rimuovi prefisso legacy "[auto]".
-    # Se esiste un equivalente Strava robusto nella stessa attività, usa quel nome.
+    # Normalizza naming segmenti auto: se trovano equivalente Strava in attività,
+    # usa il nome Strava; in ogni caso rimuovi prefisso legacy "[auto]".
     strava_like = [
         e for e in efforts
         if e.get("source") in {"strava_api", "historical", "frechet"}
     ]
-    auto_efforts = [e for e in efforts if e.get("source") == "auto"]
-
-    # Match 1:1 auto -> Strava solo quando il tratto è davvero equivalente.
-    # Evita di rinominare micro-segmenti auto (frammentati) con nomi Strava lunghi.
-    candidate_links = []
-    for ai, ae in enumerate(auto_efforts):
-        asi, aei = ae.get("start_idx"), ae.get("end_idx")
-        adist = float(ae.get("distance_m") or 0.0)
-        if asi is None or aei is None or aei <= asi or adist < 1500:
-            continue
-        a_len = max(1, aei - asi)
-
-        for si, se in enumerate(strava_like):
-            ssi, sei = se.get("start_idx"), se.get("end_idx")
-            sdist = float(se.get("distance_m") or 0.0)
-            if ssi is None or sei is None or sei <= ssi or sdist <= 0:
-                continue
-
-            overlap = max(0, min(aei, sei) - max(asi, ssi))
-            if overlap <= 0:
-                continue
-
-            s_len = max(1, sei - ssi)
-            cov_auto = overlap / a_len
-            cov_strava = overlap / s_len
-            dist_ratio = adist / sdist
-
-            # Vincoli forti: quasi stesso tratto e distanza comparabile.
-            if cov_auto < 0.85:
-                continue
-            if cov_strava < 0.65:
-                continue
-            if not (0.80 <= dist_ratio <= 1.25):
-                continue
-
-            score = cov_auto * 0.55 + cov_strava * 0.35 + (1.0 - abs(1.0 - dist_ratio)) * 0.10
-            candidate_links.append((score, ai, si))
-
-    # Assegna al massimo un auto per segmento Strava e viceversa (greedy per score).
-    used_auto = set()
-    used_strava = set()
-    for _score, ai, si in sorted(candidate_links, key=lambda x: x[0], reverse=True):
-        if ai in used_auto or si in used_strava:
-            continue
-        ae = auto_efforts[ai]
-        se = strava_like[si]
-        ae["name"] = se.get("name") or ae.get("name")
-        ae["auto_equivalent_strava"] = True
-        used_auto.add(ai)
-        used_strava.add(si)
-
     for e in efforts:
         if total_points:
             e["total_points"] = total_points
@@ -336,6 +285,26 @@ def api_activity_efforts(activity_id):
             name = (e.get("name") or "").strip()
             if name.lower().startswith("[auto]"):
                 e["name"] = name[6:].strip()
+
+            best = None
+            best_ov = 0.0
+            asi, aei = e.get("start_idx"), e.get("end_idx")
+            if asi is not None and aei is not None and aei > asi:
+                a_len = max(1, aei - asi)
+                for se in strava_like:
+                    ssi, sei = se.get("start_idx"), se.get("end_idx")
+                    if ssi is None or sei is None or sei <= ssi:
+                        continue
+                    overlap = max(0, min(aei, sei) - max(asi, ssi))
+                    if overlap <= 0:
+                        continue
+                    ov_ratio = overlap / a_len
+                    if ov_ratio > best_ov:
+                        best_ov = ov_ratio
+                        best = se
+            if best and best_ov >= 0.35:
+                e["name"] = best.get("name") or e.get("name")
+                e["auto_equivalent_strava"] = True
 
         _enrich_effort(e)
     return jsonify(efforts)
@@ -561,9 +530,7 @@ def api_refresh_activity(activity_id):
         return jsonify({"error": "Attività non trovata"}), 404
     strava_id = row["strava_activity_id"]
     if not strava_id:
-        _recompute_activity_totals_from_efforts(activity_id)
-        logger.info(f"Refresh locale attività {activity_id} completato (nessun link Strava)")
-        return jsonify({"ok": True, "saved": 0, "local_only": True})
+        return jsonify({"error": "Attività non collegata a Strava"}), 400
 
     from strava.client import StravaClient
     from strava.efforts import fetch_and_store_strava_efforts
@@ -576,9 +543,6 @@ def api_refresh_activity(activity_id):
             _save_strava_meta(get_cache(), activity_id, act_meta)
         except Exception as ex:
             logger.warning(f"Meta Strava non disponibili durante refresh: {ex}")
-
-        _recompute_activity_totals_from_efforts(activity_id)
-
         logger.info(f"Refresh attività {activity_id} completato: {saved} effort Strava")
         return jsonify({"ok": True, "saved": saved})
     except Exception as e:
