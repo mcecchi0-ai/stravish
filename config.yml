@@ -9,7 +9,7 @@ strava:
     requests_per_day: 2000
 
 cache:
-  db_path: "./cache/segments.db"
+  db_path: "./segments.db"
   # Dimensione celle per il tiling della bbox in gradi (~1.1km a 45° lat)
   tile_size_deg: 0.01
   # Overlap tra celle adiacenti per non perdere segmenti ai bordi
