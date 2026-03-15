@@ -37,6 +37,89 @@ from strava.auth import StravaAuth
 
 logger = logging.getLogger(__name__)
 
+
+def _idx_overlap_ratio(a_start, a_end, b_start, b_end):
+    try:
+        a0, a1 = int(a_start), int(a_end)
+        b0, b1 = int(b_start), int(b_end)
+    except Exception:
+        return 0.0
+    if a1 < a0:
+        a0, a1 = a1, a0
+    if b1 < b0:
+        b0, b1 = b1, b0
+    inter = min(a1, b1) - max(a0, b0)
+    if inter <= 0:
+        return 0.0
+    lena = max(1, a1 - a0)
+    lenb = max(1, b1 - b0)
+    return inter / float(min(lena, lenb))
+
+
+def _effort_is_equivalent(a, b):
+    ov = _idx_overlap_ratio(a.get("start_idx"), a.get("end_idx"), b.get("start_idx"), b.get("end_idx"))
+    if ov < 0.85:
+        return False
+    ad = float(a.get("distance_m") or 0.0)
+    bd = float(b.get("distance_m") or 0.0)
+    if ad > 0 and bd > 0:
+        dist_delta = abs(ad - bd) / max(ad, bd)
+        if dist_delta > 0.35:
+            return False
+    ae = float(a.get("elapsed_seconds") or 0.0)
+    be = float(b.get("elapsed_seconds") or 0.0)
+    if ae > 0 and be > 0:
+        t_delta = abs(ae - be) / max(ae, be)
+        if t_delta > 0.50:
+            return False
+    return True
+
+
+def _source_rank(source):
+    # Preferenza: Strava API > historical > frechet > auto
+    return {
+        "strava_api": 4,
+        "historical": 3,
+        "frechet": 2,
+        "auto": 1,
+    }.get(source or "", 0)
+
+
+def _get_effective_efforts_for_activity(activity_id):
+    """Deduplica gli effort dell'attività preferendo match Strava stabili."""
+    raw = get_cache().get_efforts_for_activity(activity_id)
+    if not raw:
+        return []
+
+    ordered = sorted(
+        raw,
+        key=lambda e: (
+            -_source_rank(e.get("source")),
+            -(float(e.get("distance_m") or 0.0)),
+            float(e.get("frechet_distance_m") or 0.0),
+            int(e.get("effort_id") or 0),
+        )
+    )
+
+    kept = []
+    for cand in ordered:
+        replaced = False
+        skip = False
+        for i, cur in enumerate(kept):
+            if not _effort_is_equivalent(cand, cur):
+                continue
+            if _source_rank(cand.get("source")) > _source_rank(cur.get("source")):
+                kept[i] = cand
+                replaced = True
+            else:
+                skip = True
+            break
+        if not skip and not replaced:
+            kept.append(cand)
+
+    kept.sort(key=lambda e: (float(e.get("start_time_s") or 9e18), int(e.get("effort_id") or 0)))
+    return kept
+
 # ── Log stream per SSE ────────────────────────────────────────────
 import queue as _queue
 logging.basicConfig(level=logging.INFO)
@@ -156,32 +239,19 @@ def api_status():
 @app.route("/api/activities")
 def api_activities():
     activities = get_cache().get_all_activities()
-    c = get_cache()._conn
-    # Conta effort totali, Strava e auto separatamente
-    all_counts    = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts GROUP BY activity_id"
-    ).fetchall()}
-    strava_counts = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts WHERE source='strava_api' GROUP BY activity_id"
-    ).fetchall()}
-    auto_counts   = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts WHERE source='auto' GROUP BY activity_id"
-    ).fetchall()}
-    hist_counts   = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts WHERE source='historical' GROUP BY activity_id"
-    ).fetchall()}
     for a in activities:
         aid = a["activity_id"]
-        a["effort_count"]           = all_counts.get(aid, 0)
-        a["strava_effort_count"]    = strava_counts.get(aid, 0)
-        a["auto_effort_count"]      = auto_counts.get(aid, 0)
-        a["historical_effort_count"]= hist_counts.get(aid, 0)
+        effective = _get_effective_efforts_for_activity(aid)
+        a["effort_count"] = len(effective)
+        a["strava_effort_count"] = sum(1 for e in effective if e.get("source") == "strava_api")
+        a["auto_effort_count"] = sum(1 for e in effective if e.get("source") == "auto")
+        a["historical_effort_count"] = sum(1 for e in effective if e.get("source") == "historical")
     return jsonify(activities)
 
 
 @app.route("/api/activities/<int:activity_id>/efforts")
 def api_activity_efforts(activity_id):
-    efforts = get_cache().get_efforts_for_activity(activity_id)
+    efforts = _get_effective_efforts_for_activity(activity_id)
     row = get_cache()._conn.execute(
         "SELECT num_points FROM activities WHERE activity_id=?", (activity_id,)
     ).fetchone()
@@ -350,7 +420,7 @@ def api_activity_summary(activity_id):
 def api_activity_medals(activity_id):
     """Restituisce le medaglie (top-3 per segmento) per questa attività."""
     cache = get_cache()
-    efforts = cache.get_efforts_for_activity(activity_id)
+    efforts = _get_effective_efforts_for_activity(activity_id)
     medals = []
     for effort in efforts:
         seg_id = effort["segment_id"]
