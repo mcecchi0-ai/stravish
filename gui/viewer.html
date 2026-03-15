@@ -1,0 +1,1570 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>stravish</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg:#0f1117; --surface:#1a1d27; --surface2:#222536;
+  --border:#2e3148; --text:#e8eaf6; --text2:#8b90b0;
+  --orange:#fc4c02; --green:#4caf50; --blue:#5b8dee;
+  --gold:#ffd700; --silver:#c0c0c0; --bronze:#cd7f32;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+
+/* TOP BAR */
+#topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.logo{font-size:18px;font-weight:700;color:var(--orange);letter-spacing:-.5px}
+#db-status{font-size:11px;color:var(--text2)}
+.spacer{flex:1}
+.btn{background:var(--orange);color:white;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn.sec{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.btn.sec:hover{background:var(--border)}
+
+/* MAIN */
+#main{display:flex;flex:1;overflow:hidden}
+
+/* LEFT — activity list */
+#left{width:280px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+#left-header{padding:10px 14px 6px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text2)}
+#act-list{flex:1;overflow-y:auto}
+
+.act-item{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
+.act-item:hover,.act-item.active{background:var(--surface2)}
+.act-item.active{border-left:3px solid var(--orange)}
+.act-name{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.act-meta{font-size:11px;color:var(--text2);margin-top:3px}
+.act-seg-count{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px}
+.act-seg-count.strava-count{background:rgba(252,76,2,.18);color:var(--orange)}
+.act-seg-count.auto-count{background:rgba(100,180,100,.18);color:#6ab06a}
+.act-seg-count.no-seg{background:rgba(255,255,255,.06);color:var(--text2)}
+.act-seg-count.hist-count{background:rgba(64,180,224,.18);color:#40b4e0}
+.act-notes-area{width:100%;margin-top:6px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:11px;padding:5px 7px;resize:vertical;min-height:40px;font-family:inherit;line-height:1.4;transition:border-color .15s}
+.act-notes-area:focus{outline:none;border-color:var(--orange)}
+.act-notes-area::placeholder{color:var(--text2)}
+.notes-saved{font-size:10px;color:var(--text2);text-align:right;height:12px;margin-top:2px}
+
+/* CENTER — map + segment list below */
+#center{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative}
+#map-wrap{flex:1;position:relative;min-height:0}
+#map{width:100%;height:100%}
+#map-controls{position:absolute;top:10px;right:10px;z-index:500;display:flex;gap:6px}
+.map-toggle{background:var(--surface);border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;transition:all .15s;user-select:none}
+.map-toggle:hover{background:var(--surface2);color:var(--text)}
+.map-toggle.active{background:var(--orange);color:white;border-color:var(--orange)}
+
+  /* STRAVA ACTIVITY ID DIALOG (post-import manuale) */
+  #strava-link-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:3000;align-items:center;justify-content:center}
+  #strava-link-modal.open{display:flex}
+  #strava-link-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:400px;max-width:95vw;padding:24px;display:flex;flex-direction:column;gap:14px}
+  #strava-link-box h3{font-size:15px;font-weight:700}
+  #strava-link-box p{font-size:12px;color:var(--text2);line-height:1.5}
+  #strava-link-id{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px;font-family:inherit}
+  #strava-link-id:focus{outline:none;border-color:var(--orange)}
+  #strava-link-footer{display:flex;gap:8px;justify-content:flex-end}
+
+  /* STRAVA EFFORT FETCH */
+  .strava-fetch-bar{display:flex;gap:5px;margin-top:6px;align-items:center}
+  .strava-id-input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:11px;padding:4px 7px;font-family:inherit;-moz-appearance:textfield}
+  .strava-id-input::-webkit-outer-spin-button,.strava-id-input::-webkit-inner-spin-button{-webkit-appearance:none}
+  .strava-id-input:focus{outline:none;border-color:var(--orange)}
+  .strava-id-input::placeholder{color:var(--text2)}
+  .fetch-btn{background:var(--orange);color:white;border:none;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;white-space:nowrap;transition:opacity .15s}
+  .fetch-btn:hover{opacity:.85}
+  .fetch-btn:disabled{opacity:.4;cursor:default}
+  .fetch-status{font-size:10px;margin-top:2px;min-height:12px}
+
+  /* TREEVIEW segmenti dentro act-item */
+.act-tree{display:none;margin-top:6px;border-top:1px solid var(--border);padding-top:6px}
+.act-tree.open{display:block}
+.tree-seg{display:flex;align-items:flex-start;gap:6px;padding:5px 4px;border-radius:5px;cursor:pointer;transition:background .1s;position:relative}
+.tree-seg:hover{background:var(--bg)}
+.tree-seg.active{background:var(--bg);outline:1px solid var(--orange)}
+.tree-seg-num{font-size:10px;color:var(--text2);width:16px;flex-shrink:0;text-align:right;margin-top:1px}
+.tree-seg-body{flex:1;min-width:0}
+.tree-seg-name{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tree-seg-meta{font-size:10px;color:var(--text2);margin-top:1px}
+.tree-seg-time{font-size:11px;font-weight:700;color:var(--orange);white-space:nowrap;flex-shrink:0}
+  #log-panel{position:fixed;bottom:0;left:0;right:0;height:0;background:var(--bg);border-top:1px solid var(--border);transition:height .2s ease;overflow:hidden;z-index:1000;display:flex;flex-direction:column}
+  #log-panel.open{height:140px}
+  #log-header{padding:4px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);flex-shrink:0}
+  #log-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);flex:1}
+  #log-clear{font-size:10px;color:var(--text2);cursor:pointer;padding:2px 6px;border:1px solid var(--border);border-radius:3px;background:none}
+  #log-close{font-size:12px;color:var(--text2);cursor:pointer;line-height:1}
+  #log-body{flex:1;overflow-y:auto;padding:4px 12px;font-family:monospace;font-size:11px;display:flex;flex-direction:column;gap:1px}
+  .log-row{display:flex;gap:8px;line-height:1.5}
+  .log-ts{color:var(--text2);flex-shrink:0}
+  .log-msg{color:var(--text);white-space:pre-wrap;word-break:break-all}
+  .log-row.WARNING .log-msg,.log-row.ERROR .log-msg{color:#e06c6c}
+  .log-row.INFO .log-msg{color:var(--text)}
+  .log-row.active-op .log-msg{color:var(--orange);font-weight:600}
+  #log-badge{display:none;position:fixed;bottom:8px;right:8px;background:var(--orange);color:white;border-radius:12px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;z-index:1001;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+  #sync-log{background:var(--surface);border-bottom:1px solid var(--border);padding:6px 12px;font-size:11px;display:flex;flex-direction:column;gap:3px;max-height:120px;overflow-y:auto}
+  .sync-log-row{display:flex;align-items:center;gap:6px;color:var(--text2)}
+  .sync-log-row .sync-spinner{animation:spin .8s linear infinite;display:inline-block}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .sync-log-row.done{color:var(--green)}
+  .sync-log-row.error{color:var(--orange)}
+  .act-delete{margin-left:6px;opacity:0;cursor:pointer;font-size:11px;transition:opacity .15s;user-select:none}
+  .act-item:hover .act-delete{opacity:.5}
+  .act-item:hover .act-delete:hover{opacity:1}
+  .tree-seg-vam{font-size:10px;font-weight:600;color:var(--orange);background:rgba(252,76,2,.12);border-radius:3px;padding:1px 4px;margin-left:5px}
+  #log-drawer{position:fixed;bottom:0;left:0;right:0;height:220px;background:var(--bg);border-top:1px solid var(--border);display:flex;flex-direction:column;transform:translateY(100%);transition:transform .2s ease;z-index:1500}
+  #log-drawer.open{transform:translateY(0)}
+  #log-header{display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid var(--border);flex-shrink:0}
+  #log-header span:not(:first-child){cursor:pointer;opacity:.6;font-size:13px;margin-left:auto}
+  #log-header span:not(:first-child):hover{opacity:1}
+  #log-clear{margin-left:auto!important}
+  #log-body{flex:1;overflow-y:auto;padding:6px 10px;font-family:monospace;font-size:11px;display:flex;flex-direction:column;gap:2px}
+  .log-entry{padding:2px 6px;border-radius:3px;white-space:pre-wrap;word-break:break-all}
+  .log-entry.INFO{color:var(--text)}
+  .log-entry.WARNING{color:#f0b429;background:rgba(240,180,41,.08)}
+  .log-entry.ERROR{color:#e05c5c;background:rgba(224,92,92,.10)}
+  .log-entry.DEBUG{color:var(--text2)}
+  #log-badge{font-size:10px;background:#e05c5c;color:#fff;border-radius:8px;padding:0 5px;display:none}
+  #settings-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;align-items:center;justify-content:center}
+  #settings-modal.open{display:flex}
+  #settings-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:420px;max-width:95vw;display:flex;flex-direction:column;overflow:hidden}
+  #settings-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+  #settings-header h3{flex:1;font-size:15px;font-weight:700}
+  #settings-body{padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+  .settings-section{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-top:4px}
+  .settings-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .settings-row label{font-size:12px;color:var(--text);flex:1}
+  .settings-row input,.settings-row select{width:200px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:12px;padding:5px 8px}
+  #settings-footer{padding:12px 18px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end;gap:10px}
+  .act-summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin:8px 0}
+  .summary-cell .value.empty{color:var(--text2);font-weight:400;font-size:13px}
+  .summary-cell{background:var(--surface);padding:10px 12px}
+  .summary-cell .label{font-size:10px;color:var(--text2);margin-bottom:2px}
+  .summary-cell .value{font-size:14px;font-weight:700;color:var(--text)}
+  .summary-cell .sub{font-size:10px;color:var(--text2);margin-top:2px}
+  .act-summary-compounds{display:flex;gap:1px;background:var(--border);border-bottom:1px solid var(--border)}
+  .summary-compound{flex:1;background:var(--surface);padding:10px 12px}
+  .compound-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin-bottom:6px}
+  .compound-row{display:flex;justify-content:space-between;align-items:baseline;margin-top:3px}
+  .compound-label{font-size:10px;color:var(--text2);min-width:32px}
+  .compound-value{font-size:13px;font-weight:700;color:var(--text)}
+  .compound-value.empty{font-weight:400;color:var(--text2)}
+.act-expand{float:right;font-size:11px;color:var(--text2);cursor:pointer;padding:0 4px;user-select:none;transition:transform .15s}
+.act-expand.open{transform:rotate(90deg)}
+
+/* RIGHT — segment history */
+#right{width:0;flex-shrink:0;background:var(--surface);display:flex;flex-direction:column;overflow:hidden;transition:width .25s ease}
+#right.open{width:400px;border-left:1px solid var(--border)}
+#right-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:8px}
+#right-seg-name{font-size:14px;font-weight:700;flex:1;line-height:1.3}
+.close-btn{cursor:pointer;color:var(--text2);font-size:18px;line-height:1;flex-shrink:0}
+.close-btn:hover{color:var(--text)}
+#right-body{flex:1;overflow-y:auto}
+
+.seg-stats-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-bottom:1px solid var(--border)}
+.stat-cell{background:var(--surface2);padding:10px 12px}
+.stat-cell .label{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.stat-cell .value{font-size:15px;font-weight:700;margin-top:2px}
+.chart-section{padding:14px;border-bottom:1px solid var(--border)}
+.section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--text2);margin-bottom:8px}
+.chart-container{position:relative;height:130px}
+.efforts-section{padding:14px}
+.efforts-table{width:100%;border-collapse:collapse}
+.efforts-table th{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);padding:4px 6px;text-align:left;border-bottom:1px solid var(--border)}
+  .medals-section{padding:10px 14px 14px}
+  .medal-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)}
+  .medal-row:last-child{border-bottom:none}
+  .medal-icon{font-size:18px;flex-shrink:0;width:24px;text-align:center}
+  .medal-name{flex:1;font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+  .medal-name:hover{color:var(--orange)}
+  .medal-time{font-size:12px;font-weight:700;color:var(--text);white-space:nowrap}
+  .medal-total{font-size:10px;color:var(--text2);white-space:nowrap}
+  .cur-act-row{background:rgba(252,76,2,.12)!important}
+  .cur-act-row td{border-top:1px solid rgba(252,76,2,.25)!important;border-bottom:1px solid rgba(252,76,2,.25)!important}
+.efforts-table td{padding:7px 6px;border-bottom:1px solid var(--border);vertical-align:middle}
+.efforts-table tr:hover td{background:var(--surface2)}
+.rank-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:700}
+.rank-1{background:var(--gold);color:#000}
+.rank-2{background:var(--silver);color:#000}
+.rank-3{background:var(--bronze);color:#fff}
+.rank-n{background:var(--surface2);color:var(--text2)}
+.delta-best{font-size:11px;color:var(--text2)}
+.delta-best.is-best{color:var(--green);font-weight:600}
+
+/* DROP OVERLAY */
+#import-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(15,17,23,.85);z-index:1000;flex-direction:column;gap:12px}
+#drop-zone{border:2px dashed var(--border);border-radius:16px;padding:40px 56px;text-align:center;color:var(--text2);transition:all .2s;cursor:pointer}
+#drop-zone.drag-over{border-color:var(--orange);color:var(--text);background:rgba(252,76,2,.05)}
+#drop-zone .icon{font-size:36px;margin-bottom:8px}
+#import-progress{display:none;text-align:center;color:var(--text2)}
+.spinner{font-size:24px;animation:spin 1s linear infinite;display:block;margin-bottom:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* STRAVA SYNC MODAL */
+#sync-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;align-items:center;justify-content:center}
+#sync-modal.open{display:flex}
+#sync-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:560px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;overflow:hidden}
+#sync-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+#sync-header h3{flex:1;font-size:15px;font-weight:700}
+#sync-body{flex:1;overflow-y:auto}
+#sync-footer{padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;align-items:center}
+#sync-footer .sync-count{flex:1;font-size:11px;color:var(--text2)}
+.strava-act-row{display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--border);transition:background .1s}
+.strava-act-row:hover{background:var(--surface2)}
+.strava-act-row.imported{opacity:.45}
+.strava-act-row input[type=checkbox]{accent-color:var(--orange);width:15px;height:15px;flex-shrink:0;cursor:pointer}
+.strava-act-row.imported input[type=checkbox]{cursor:default}
+.strava-act-info{flex:1;min-width:0}
+.strava-act-name{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.strava-act-meta{font-size:10px;color:var(--text2);margin-top:2px}
+.imported-badge{font-size:10px;color:var(--green);flex-shrink:0}
+.strava-link{font-size:10px;color:var(--blue);text-decoration:none;flex-shrink:0}
+.strava-link:hover{text-decoration:underline}
+#sync-status{font-size:11px;color:var(--text2);padding:24px;text-align:center}
+
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <span class="logo">stravish</span>
+  <span id="db-status">Connessione…</span>
+  <div class="spacer"></div>
+  <button class="btn sec" id="btn-sync-strava">⚡ Sync Strava</button>
+  <button class="btn sec" id="btn-import">+ Importa GPX</button>
+  <button class="btn sec" id="btn-settings" title="Impostazioni">⚙</button>
+  <button class="btn sec" id="btn-log" title="Log attività">📋 <span id="log-badge"></span></button>
+</div>
+
+<div id="main">
+
+  <!-- LEFT: activity list -->
+  <div id="left">
+    <div id="left-header">Attività</div>
+    <div id="sync-log" style="display:none"></div>
+    <div id="act-list"><div style="padding:24px;text-align:center;color:var(--text2)">Caricamento…</div></div>
+  </div>
+
+  <!-- CENTER: map + segment strip -->
+  <div id="center">
+    <div id="map-wrap">
+      <div id="map"></div>
+      <div id="map-controls">
+        <div class="map-toggle active" id="toggle-pan">🔒 Pan</div>
+        <div class="map-toggle" id="toggle-fit">⊞ Fit</div>
+      </div>
+      <div id="import-overlay">
+        <div id="drop-zone">
+          <div class="icon">🗺️</div>
+          <p>Trascina qui i tuoi file <strong>GPX</strong></p>
+          <small>oppure clicca per selezionarli</small>
+        </div>
+        <div id="import-progress">
+          <span class="spinner">⟳</span>
+          <span id="import-msg">Importazione in corso…</span>
+        </div>
+        <input type="file" id="file-input" accept=".gpx" multiple style="display:none">
+      </div>
+    </div>
+
+  </div>
+
+  <!-- RIGHT: segment history -->
+  <div id="right">
+    <div id="right-header">
+      <div id="right-seg-name">—</div>
+      <div class="close-btn" id="right-close">✕</div>
+    </div>
+    <div id="right-body"></div>
+  </div>
+
+</div>
+
+<!-- STRAVA LINK DIALOG (post-import manuale) -->
+<div id="strava-link-modal">
+  <div id="strava-link-box">
+    <h3>🔗 Associa a Strava</h3>
+    <p>Incolla l'ID dell'attività Strava corrispondente per importare automaticamente tutti gli effort (es. da <code>strava.com/activities/<b>1234567890</b></code>).</p>
+    <input id="strava-link-id" type="number" placeholder="ID attività Strava (opzionale)">
+    <div id="strava-link-footer">
+      <button class="btn sec" id="strava-link-skip">Salta</button>
+      <button class="btn" id="strava-link-confirm">Importa effort</button>
+    </div>
+  </div>
+</div>
+
+
+<div id="settings-modal">
+  <div id="settings-box">
+    <div id="settings-header">
+      <h3>⚙ Impostazioni</h3>
+      <div class="close-btn" id="settings-close">✕</div>
+    </div>
+    <div id="settings-body">
+      <div class="settings-section">Profilo ciclista</div>
+      <div class="settings-row">
+        <label>Peso ciclista (kg)</label>
+        <input type="number" id="cfg-weight" min="40" max="150" step="0.5" placeholder="75">
+      </div>
+      <div class="settings-row">
+        <label>Peso bici + attrezzatura (kg)</label>
+        <input type="number" id="cfg-bike" min="5" max="30" step="0.5" placeholder="10">
+      </div>
+      <div class="settings-section">Resistenza</div>
+      <div class="settings-row">
+        <label>Coefficiente attrito (Crr)</label>
+        <select id="cfg-crr">
+          <option value="0.003">Asfalto liscio / pista (0.003)</option>
+          <option value="0.005" selected>Asfalto normale (0.005)</option>
+          <option value="0.007">Asfalto ruvido / graniglia (0.007)</option>
+          <option value="0.012">Sterrato compatto (0.012)</option>
+          <option value="0.020">Sterrato / ghiaia (0.020)</option>
+        </select>
+      </div>
+      <div class="settings-section">Posizione aerodinamica (CdA)</div>
+      <div class="settings-row">
+        <label>Posizione</label>
+        <select id="cfg-cda">
+          <option value="0.45">Eretta / MTB (0.45)</option>
+          <option value="0.36">Sportiva con mani sul manubrio (0.36)</option>
+          <option value="0.32" selected>Sportiva con mani sui manici (0.32)</option>
+          <option value="0.26">Bassa / gomiti sul tubo (0.26)</option>
+          <option value="0.22">TT / triathlon (0.22)</option>
+        </select>
+      </div>
+    </div>
+    <div id="settings-footer">
+      <span id="settings-saved" style="font-size:11px;color:var(--green)"></span>
+      <button class="btn" id="settings-save">Salva</button>
+    </div>
+  </div>
+</div>
+
+<div id="sync-modal">
+  <div id="sync-box">
+    <div id="sync-header">
+      <span style="font-size:20px">⚡</span>
+      <h3>Attività Strava</h3>
+      <button class="btn sec" id="sync-select-all" style="font-size:11px;padding:4px 10px">Seleziona nuove</button>
+      <div class="close-btn" id="sync-close">✕</div>
+    </div>
+    <div id="sync-body"><div id="sync-status">Caricamento…</div></div>
+    <div id="sync-footer">
+      <span class="sync-count" id="sync-count"></span>
+      <button class="btn sec" id="sync-cancel">Chiudi</button>
+      <button class="btn sec" id="sync-open-strava" style="display:none">↗ Apri Strava</button>
+      <button class="btn" id="sync-import-selected" style="display:none">⬇ Importa da Strava</button>
+    </div>
+  </div>
+</div>
+
+<div id="log-drawer">
+  <div id="log-header">
+    <span style="font-weight:700;font-size:12px">📋 Log attività</span>
+    <span id="log-clear" title="Pulisci">🗑</span>
+    <span id="log-close">✕</span>
+  </div>
+  <div id="log-body"></div>
+</div>
+
+<script>
+const API = 'http://127.0.0.1:5757';
+let map, panMode = true;
+let allActivities = [], currentActivityId = null, currentEfforts = [];
+let activeSegmentId = null, speedChart = null;
+let mapLayers = [];
+
+// ── MAP ───────────────────────────────────────────────────────────
+map = L.map('map', {zoomControl:true}).setView([44, 12.5], 10);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution:'© OpenStreetMap © CARTO', maxZoom:19
+}).addTo(map);
+
+document.getElementById('toggle-pan').addEventListener('click', () => {
+  panMode = true;
+  document.getElementById('toggle-pan').classList.add('active');
+  document.getElementById('toggle-fit').classList.remove('active');
+});
+document.getElementById('toggle-fit').addEventListener('click', () => {
+  panMode = false;
+  document.getElementById('toggle-pan').classList.remove('active');
+  document.getElementById('toggle-fit').classList.add('active');
+});
+
+function clearMapLayers() {
+  mapLayers.forEach(l => map.removeLayer(l));
+  mapLayers = [];
+}
+function mapFocusLayer(layer) {
+  if (panMode) map.panTo(layer.getBounds().getCenter());
+  else map.fitBounds(layer.getBounds(), {padding:[40,40]});
+}
+
+// ── API ───────────────────────────────────────────────────────────
+async function api(path, options) {
+  const r = await fetch(API + path, options);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// ── STATUS ────────────────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const s = await api('/api/status');
+    document.getElementById('db-status').textContent =
+      `${s.activities} attività · ${s.segments} segmenti · ${s.efforts} effort`;
+    if (s.activities > 0 || s.efforts > 0) hideImportOverlay();
+  } catch(e) {
+    document.getElementById('db-status').textContent = '⚠ Server non raggiungibile';
+  }
+}
+function hideImportOverlay() {
+  document.getElementById('import-overlay').style.display = 'none';
+}
+
+// ── ACTIVITIES ────────────────────────────────────────────────────
+async function loadActivities() {
+  allActivities = await api('/api/activities');
+  renderActivities();
+}
+
+// ── LOG PANEL SSE ────────────────────────────────────────────────
+let _activeOps = 0;
+
+function logPanel() { return document.getElementById('log-drawer'); }
+function logBody()  { return document.getElementById('log-body'); }
+
+function addLog(ts, level, msg) {
+  const body = logBody();
+  if (!body) return;
+
+  // Determina se è un'operazione attiva (fetch in corso)
+  const isActive = /fetching|in corso|processing|importati|rate limit|strava restituisce/i.test(msg);
+  const row = document.createElement('div');
+  row.className = `log-row ${level}${isActive?' active-op':''}`;
+  row.innerHTML = `<span class="log-ts">${ts}</span><span class="log-msg">${msg}</span>`;
+  body.appendChild(row);
+  // Mantieni max 200 righe
+  while (body.children.length > 200) body.removeChild(body.firstChild);
+  body.scrollTop = body.scrollHeight;
+
+  // Apri pannello automaticamente per WARNING/ERROR o operazioni attive
+  if (level === 'WARNING' || level === 'ERROR' || isActive) {
+    logPanel().classList.add('open');
+    document.getElementById('log-badge').style.display = 'none';
+  }
+}
+
+function startSSELog() {
+  const es = new EventSource(`${API}/api/logs/stream`);
+  es.onmessage = e => {
+    try {
+      const d = JSON.parse(e.data);
+      addLog(d.ts, d.level, d.msg);
+    } catch {}
+  };
+  es.onerror = () => {
+    // riconnette automaticamente
+  };
+}
+
+document.getElementById('btn-log').addEventListener('click', () => {
+  logPanel().classList.toggle('open');
+  if (logPanel().classList.contains('open')) {
+    document.getElementById('log-badge').style.display = 'none';
+    logBody().scrollTop = logBody().scrollHeight;
+  }
+});
+
+document.getElementById('log-close').addEventListener('click', () => {
+  logPanel().classList.remove('open');
+  const badge = document.getElementById('log-badge');
+  badge.style.display = 'block';
+  // Aggiorna badge con ultimo messaggio
+  const rows = logBody().children;
+  if (rows.length) {
+    const last = rows[rows.length-1].querySelector('.log-msg');
+    document.getElementById('log-badge-text').textContent =
+      (last?.textContent || '').slice(0,40);
+  }
+});
+document.getElementById('log-badge').addEventListener('click', () => {
+  logPanel().classList.add('open');
+  document.getElementById('log-badge').style.display = 'none';
+  logBody().scrollTop = logBody().scrollHeight;
+});
+document.getElementById('log-clear').addEventListener('click', () => {
+  logBody().innerHTML = '';
+});
+
+// ── SYNC LOG ─────────────────────────────────────────────────────
+const _syncActive = new Map(); // activityId → {name, startTime}
+
+function syncLogUpdate() {
+  const el = document.getElementById('sync-log');
+  if (_syncActive.size === 0) { el.style.display = 'none'; return; }
+  el.style.display = 'flex';
+  el.innerHTML = [..._syncActive.entries()].map(([id, s]) => {
+    const elapsed = Math.round((Date.now() - s.startTime) / 1000);
+    return `<div class="sync-log-row"><span class="sync-spinner">⟳</span><span>${s.name}</span><span style="margin-left:auto;opacity:.6">${elapsed}s</span></div>`;
+  }).join('');
+}
+
+function syncLogStart(activityId, name) {
+  _syncActive.set(activityId, { name, startTime: Date.now() });
+  syncLogUpdate();
+  // Aggiorna elapsed ogni secondo finché attivo
+  const timer = setInterval(() => {
+    if (_syncActive.has(activityId)) syncLogUpdate();
+    else clearInterval(timer);
+  }, 1000);
+}
+
+function syncLogDone(activityId, msg, isError) {
+  _syncActive.delete(activityId);
+  syncLogUpdate();
+  // Mostra messaggio finale brevemente nel log
+  if (msg) {
+    const el = document.getElementById('sync-log');
+    el.style.display = 'flex';
+    const row = document.createElement('div');
+    row.className = `sync-log-row ${isError ? 'error' : 'done'}`;
+    row.textContent = msg;
+    el.prepend(row);
+    setTimeout(() => { row.remove(); if (_syncActive.size === 0) el.style.display = 'none'; }, 4000);
+  }
+}
+
+// ── SETTINGS ─────────────────────────────────────────────────────
+let appSettings = {};
+
+async function loadSettings() {
+  try { appSettings = await api('/api/settings'); } catch(e) {}
+  // Precompila form
+  if (appSettings.weight_kg) document.getElementById('cfg-weight').value = appSettings.weight_kg;
+  if (appSettings.bike_kg)   document.getElementById('cfg-bike').value   = appSettings.bike_kg;
+  if (appSettings.crr) {
+    const sel = document.getElementById('cfg-crr');
+    [...sel.options].forEach(o => { if (Math.abs(+o.value - +appSettings.crr) < 0.001) o.selected = true; });
+  }
+  if (appSettings.cda) {
+    const sel = document.getElementById('cfg-cda');
+    [...sel.options].forEach(o => { if (Math.abs(+o.value - +appSettings.cda) < 0.001) o.selected = true; });
+  }
+}
+
+document.getElementById('btn-settings').addEventListener('click', () => {
+  document.getElementById('settings-modal').classList.add('open');
+});
+document.getElementById('settings-close').addEventListener('click', () => {
+  document.getElementById('settings-modal').classList.remove('open');
+});
+document.getElementById('settings-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('settings-modal'))
+    document.getElementById('settings-modal').classList.remove('open');
+});
+document.getElementById('settings-save').addEventListener('click', async () => {
+  const payload = {
+    weight_kg: document.getElementById('cfg-weight').value || '75',
+    bike_kg:   document.getElementById('cfg-bike').value   || '10',
+    crr:       document.getElementById('cfg-crr').value,
+    cda:       document.getElementById('cfg-cda').value,
+  };
+  await api('/api/settings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  appSettings = payload;
+  const saved = document.getElementById('settings-saved');
+  saved.textContent = '✓ Salvato';
+  setTimeout(() => saved.textContent = '', 2000);
+  // Ricarica summary attivo se aperto
+  if (currentActivityId) showActivitySummary(currentActivityId);
+});
+
+function attachNotesSave(ta) {
+  ta.addEventListener('click', e => e.stopPropagation());
+  let timer;
+  ta.addEventListener('input', () => {
+    const id = +ta.dataset.id;
+    const st = document.getElementById('ns-'+id);
+    if(st) st.textContent = '✎ …';
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      await fetch(`${API}/api/activities/${id}/notes`, {
+        method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({notes: ta.value})
+      });
+      const act = allActivities.find(a => a.activity_id===id);
+      if(act) act.notes = ta.value;
+      if(st) { st.textContent='✓ salvato'; setTimeout(()=>st.textContent='',2000); }
+    }, 800);
+  });
+}
+
+function renderActivities() {
+  const el = document.getElementById('act-list');
+  if (!allActivities.length) {
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text2)">Nessuna attività.<br>Importa un file GPX.</div>';
+    return;
+  }
+  el.innerHTML = allActivities.map(a => {
+    const date = a.activity_date ? a.activity_date.slice(0,10) : 'data ignota';
+    const dist = (a.total_distance_m/1000).toFixed(1);
+    const ele  = Math.round(a.total_elevation_m);
+    const stravaCount = a.strava_effort_count || 0;
+    const autoCount   = a.auto_effort_count   || 0;
+    const histCount   = a.historical_effort_count || 0;
+    let segBadge = '';
+    if (stravaCount > 0 || autoCount > 0 || histCount > 0) {
+      const parts = [];
+      if (stravaCount > 0) parts.push(`<span class="act-seg-count strava-count">⚡${stravaCount}</span>`);
+      if (histCount   > 0) parts.push(`<span class="act-seg-count hist-count">◈${histCount}</span>`);
+      if (autoCount   > 0) parts.push(`<span class="act-seg-count auto-count">⬡${autoCount}</span>`);
+      segBadge = `<div style="display:flex;gap:4px;margin-top:3px">${parts.join('')}</div>`;
+    } else if (a.strava_activity_id) {
+      segBadge = `<div style="margin-top:3px"><span class="act-seg-count no-seg">nessun segmento</span></div>`;
+    }
+    return `<div class="act-item ${a.activity_id===currentActivityId?'active':''}" data-id="${a.activity_id}">
+      <div style="display:flex;align-items:center;gap:4px">
+        <div class="act-name" style="flex:1">${a.filename.replace('.gpx','')}</div>
+        ${a.effort_count>0 ? `<span class="act-expand ${a.activity_id===currentActivityId?'open':''}" data-expand="${a.activity_id}">▶</span>` : ''}
+      </div>
+      <div class="act-meta">${date} · ${dist} km · +${ele} m
+        <span class="act-delete" data-id="${a.activity_id}" title="Elimina attività">🗑</span>
+      </div>
+      ${segBadge}
+      <div class="strava-fetch-bar">
+        <input class="strava-id-input" type="number" placeholder="Strava Activity ID"
+               data-id="${a.activity_id}" value="${a.strava_activity_id||''}"
+               title="ID numerico dell'attività Strava">
+        <button class="fetch-btn" data-id="${a.activity_id}"
+                style="${a.strava_effort_count>0?'background:var(--green)':''}">
+          ${a.strava_effort_count>0?'⟳ Strava':'⚡ Strava'}
+        </button>
+      </div>
+      <div class="fetch-status" id="fs-${a.activity_id}">
+        ${a.strava_effort_count>0?`<span style="color:var(--green)">✓ ${a.strava_effort_count} da Strava</span>`:''}
+      </div>
+      <div class="act-tree ${a.activity_id===currentActivityId?'open':''}" id="tree-${a.activity_id}"></div>
+
+    </div>`;
+  }).join('');
+
+  // Event delegation: tutti i click su act-list gestiti qui — nessun listener multiplo
+
+  el.querySelectorAll('.act-notes-area').forEach(attachNotesSave);
+
+  // ── Fetch effort da Strava API ────────────────────────────────
+  el.querySelectorAll('.strava-id-input').forEach(inp => {
+    inp.addEventListener('click', e => e.stopPropagation());
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        inp.closest('.act-item').querySelector('.fetch-btn').click();
+      }
+    });
+  });
+
+  el.querySelectorAll('.fetch-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const id = +btn.dataset.id;
+      const input = el.querySelector(`.strava-id-input[data-id="${id}"]`);
+      const statusEl = document.getElementById('fs-' + id);
+      const stravaId = input ? input.value.trim() : '';
+      if (!stravaId) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">⚠ Inserisci l'ID attività Strava</span>`;
+        return;
+      }
+      btn.disabled = true;
+      if (statusEl) statusEl.innerHTML = '<span>⟳ Fetching da Strava…</span>';
+      try {
+        const res = await fetch(`${API}/api/activities/${id}/strava-efforts`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({strava_activity_id: +stravaId})
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        if (statusEl) statusEl.innerHTML =
+          `<span style="color:var(--green)">✓ ${data.saved} effort importati da Strava</span>`;
+        btn.textContent = '⟳ Strava';
+        btn.style.background = 'var(--green)';
+        const act = allActivities.find(a => a.activity_id === id);
+        if (act) {
+          act.strava_effort_source  = 'strava_api';
+          act.strava_activity_id    = +stravaId;
+          act.strava_effort_count   = (act.strava_effort_count || 0) + data.saved;
+          act.effort_count          = (act.effort_count || 0) + data.saved;
+        }
+        // Ricarica lista per aggiornare badge e colore pulsante dal DB
+        await loadActivities();
+        if (currentActivityId === id) {
+          const efforts = await api(`/api/activities/${id}/efforts`);
+          currentEfforts = efforts;
+          populateTree(id, efforts);
+          clearMapLayers();
+          showEffortsOnMap(efforts);
+        }
+        await loadStatus();
+      } catch(err) {
+        if (statusEl) statusEl.innerHTML =
+          `<span style="color:var(--orange)">⚠ ${err.message}</span>`;
+      }
+      btn.disabled = false;
+    });
+    btn.addEventListener('click', e => e.stopPropagation());
+  });
+}
+
+async function selectActivity(id) {
+  // Toggle: se già selezionata, deseleziona
+  if (currentActivityId === id) {
+    currentActivityId = null;
+    activeSegmentId = null;
+    currentEfforts = [];
+    document.getElementById('right').classList.remove('open');
+    renderActivities();
+    clearMapLayers();
+    return;
+  }
+  currentActivityId = id;
+  activeSegmentId = null;
+  document.getElementById('right').classList.remove('open');
+  clearMapLayers();
+
+  const efforts = await api(`/api/activities/${id}/efforts`);
+  currentEfforts = efforts;
+  renderActivities();       // dopo aver caricato efforts, così tree-${id} esiste
+  populateTree(id, efforts);
+  showEffortsOnMap(efforts);
+  showActivitySummary(id);
+}
+
+async function showActivitySummary(id) {
+  const act = allActivities.find(a => a.activity_id === id);
+  document.getElementById('right-seg-name').textContent = act ? (act.activity_name || act.filename || '—') : '—';
+  document.getElementById('right-body').innerHTML = '<div style="padding:24px;text-align:center;color:var(--text2)">Caricamento…</div>';
+  document.getElementById('right').classList.add('open');
+  try {
+    const [s, medals] = await Promise.all([
+      api(`/api/activities/${id}/summary`),
+      api(`/api/activities/${id}/medals`).catch(() => [])
+    ]);
+    renderActivitySummary(s, medals);
+  } catch(e) {
+    document.getElementById('right-body').innerHTML = `<div style="padding:16px;color:var(--orange)">Errore: ${e.message}</div>`;
+  }
+}
+
+function renderActivitySummary(s, medals) {
+  const fmt = v => v != null ? Math.round(v) : null;
+  const fmtTime = secs => {
+    if (!secs) return null;
+    const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60), sc = secs%60;
+    return h>0 ? `${h}h ${m}m` : `${m}m ${sc<10?'0':''}${sc}s`;
+  };
+
+  const fmtVal = v => v != null ? Math.round(v) : null;
+  const empty = v => !v || v === '—';
+
+  // Celle semplici (sempre visibili)
+  const simpleCells = [
+    { label: 'Distanza',   value: s.total_distance_m >= 1000 ? (s.total_distance_m/1000).toFixed(1)+' km' : (s.total_distance_m ? Math.round(s.total_distance_m)+' m' : '—') },
+    { label: 'Dislivello', value: s.total_elevation_m ? '+'+Math.round(s.total_elevation_m)+' m' : '—' },
+    { label: 'Tempo',      value: fmtTime(s.moving_time_s) || '—' },
+    { label: 'Potenza media',       value: s.avg_watts
+        ? `${fmt(s.avg_watts)} W`
+        : (s.avg_watts_estimated
+            ? `<span style="color:var(--orange)" title="Stima modello fisico">${fmt(s.avg_watts_estimated)} W</span>`
+            : '—') },
+    { label: 'Calorie',    value: s.calories ? `${Math.round(s.calories)} kcal` : '—' },
+  ];
+
+  const simpleCellsHtml = simpleCells.map(x => `
+    <div class="summary-cell">
+      <div class="label">${x.label}</div>
+      <div class="value ${x.value==='—'?'empty':''}">${x.value}</div>
+    </div>`).join('');
+
+  // Riquadro BPM
+  const hrHtml = `
+    <div class="summary-compound">
+      <div class="compound-title">Freq. cardiaca</div>
+      <div class="compound-row">
+        <span class="compound-label">media</span>
+        <span class="compound-value ${!s.avg_heartrate?'empty':''}">${s.avg_heartrate ? fmt(s.avg_heartrate)+' bpm' : '—'}</span>
+      </div>
+      <div class="compound-row">
+        <span class="compound-label">max</span>
+        <span class="compound-value ${!s.max_heartrate?'empty':''}">${s.max_heartrate ? fmt(s.max_heartrate)+' bpm' : '—'}</span>
+      </div>
+      <div class="compound-row">
+        <span class="compound-label">σ</span>
+        <span class="compound-value ${!s.sigma_heartrate?'empty':''}">${s.sigma_heartrate ? '±'+fmt(s.sigma_heartrate) : '—'}</span>
+      </div>
+    </div>`;
+
+  // Riquadro Cadenza
+  const cadHtml = `
+    <div class="summary-compound">
+      <div class="compound-title">Cadenza</div>
+      <div class="compound-row">
+        <span class="compound-label">media</span>
+        <span class="compound-value ${!s.avg_cadence?'empty':''}">${s.avg_cadence ? fmt(s.avg_cadence)+' rpm' : '—'}</span>
+      </div>
+      <div class="compound-row">
+        <span class="compound-label">max</span>
+        <span class="compound-value ${!s.max_cadence?'empty':''}">${s.max_cadence ? fmt(s.max_cadence)+' rpm' : '—'}</span>
+      </div>
+      <div class="compound-row">
+        <span class="compound-label">σ</span>
+        <span class="compound-value ${!s.sigma_cadence?'empty':''}">${s.sigma_cadence ? '±'+fmt(s.sigma_cadence) : '—'}</span>
+      </div>
+    </div>`;
+
+  const statsHtml = `
+    <div class="act-summary-grid">
+      ${simpleCellsHtml}
+    </div>
+    <div class="act-summary-compounds">
+      ${hrHtml}${cadHtml}
+    </div>`;
+
+  const date = s.activity_date ? (() => {
+    const d = s.activity_date;
+    const datePart = d.slice(0,10);
+    const timePart = d.length >= 16 ? d.slice(11,16) : '';
+    return timePart ? `${datePart} alle ${timePart}` : datePart;
+  })() : '';
+  const effortBadge = s.effort_count > 0
+    ? `<span style="color:var(--green)">✓ ${s.effort_count} segmenti</span>`
+    : `<span style="color:var(--text2)">nessun segmento — usa ⚡ Strava</span>`;
+
+  const MEDAL_ICONS = ['🥇','🥈','🥉'];
+  const medalsHtml = (medals && medals.length) ? `
+    <div class="medals-section">
+      <div class="section-title" style="padding:0 0 6px">Premi di questa uscita</div>
+      ${medals.map(m => `
+        <div class="medal-row">
+          <span class="medal-icon">${MEDAL_ICONS[m.rank-1]}</span>
+          <span class="medal-name" onclick="selectSegment(${m.segment_id})" title="${m.name}">${m.name}</span>
+          <span class="medal-time">${formatTime(m.elapsed_seconds)}</span>
+          <span class="medal-total">su ${m.total}</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  const notesHtml = `
+    <div style="padding:10px 14px 14px">
+      <div class="section-title" style="padding:0 0 6px">Note</div>
+      <textarea class="act-notes-area detail-notes" data-id="${s.activity_id}"
+        placeholder="Note sull'uscita…">${s.notes||''}</textarea>
+      <div class="notes-saved" id="ns-${s.activity_id}"></div>
+    </div>`;
+
+  document.getElementById('right-body').innerHTML = `
+    <div style="padding:10px 14px 6px;font-size:11px;color:var(--text2)">${date} · ${effortBadge}</div>
+    ${statsHtml}
+    ${medalsHtml}
+    ${notesHtml}`;
+
+  const detailTa = document.querySelector('.detail-notes');
+  if (detailTa) attachNotesSave(detailTa);
+}
+
+// ── TREEVIEW ──────────────────────────────────────────────────────
+function populateTree(actId, efforts) {
+  const treeEl = document.getElementById('tree-' + actId);
+  if (!treeEl) return;
+
+  if (!efforts.length) {
+    treeEl.innerHTML = '<div style="font-size:11px;color:var(--text2);padding:4px 0">Nessun segmento percorso</div>';
+    return;
+  }
+
+  treeEl.innerHTML = efforts.map((e, i) => {
+    const dist = e.distance_m >= 1000
+      ? (e.distance_m/1000).toFixed(2)+' km' : Math.round(e.distance_m)+' m';
+    const grade = e.avg_grade_pct
+      ? (e.avg_grade_pct>0?'+':'')+e.avg_grade_pct.toFixed(1)+'%' : '';
+    const vamTag = '';
+    return `<div class="tree-seg ${e.segment_id===activeSegmentId?'active':''}" data-id="${e.segment_id}">
+      <div class="tree-seg-num">${i+1}</div>
+      <div class="tree-seg-body">
+        <div class="tree-seg-name">${e.name}</div>
+        <div class="tree-seg-meta">${dist}${grade?' · '+grade:''}${vamTag}</div>
+      </div>
+      <div class="tree-seg-time">${formatTime(e.elapsed_seconds)}</div>
+    </div>`;
+  }).join('');
+
+  // I click sui .tree-seg sono gestiti via event delegation su #act-list
+}
+
+async function showEffortsOnMap(efforts, activeSegId) {
+  // 1. Tracciato GPX completo in grigio (sfondo)
+  if (currentActivityId) {
+    try {
+      const resp = await api(`/api/activities/${currentActivityId}/gpx-track`);
+      const track = resp.track || resp; // compatibilità formato vecchio/nuovo
+      const streamLength = resp.stream_length || null;
+
+      if (track && track.length > 1) {
+        const gpxLayer = L.polyline(track, {
+          color: '#444', weight: 2, opacity: 0.45
+        }).addTo(map);
+        mapLayers.push(gpxLayer);
+
+        // 2. Tratte non coperte da segmenti in giallo
+        const hasIndices = efforts.some(e => e.start_idx != null && e.end_idx != null);
+        if (efforts.length && hasIndices) {
+          // stream_length: lunghezza originale dello stream (per normalizzare indici decimati)
+          const sLen = streamLength || efforts[0].total_points || track.length;
+          const tLen = track.length;
+
+          const covered = new Uint8Array(tLen);
+          for (const e of efforts) {
+            if (e.start_idx == null || e.end_idx == null) continue;
+            // Normalizza indici stream → indici track decimata
+            const si = Math.round(e.start_idx * (tLen - 1) / (sLen - 1));
+            const ei = Math.round(e.end_idx   * (tLen - 1) / (sLen - 1));
+            for (let i = Math.max(0, si); i <= Math.min(tLen - 1, ei); i++) covered[i] = 1;
+          }
+
+          // Raggruppa tratte non coperte e disegnale in giallo tratteggiato
+          let seg = [];
+          for (let i = 0; i < tLen; i++) {
+            if (!covered[i]) {
+              seg.push(track[i]);
+            } else {
+              if (seg.length > 2) {
+                const gl = L.polyline(seg, {color:'#f5c400', weight:3, opacity:.8,
+                  dashArray:'8,5'}).addTo(map);
+                gl.bindTooltip('Tratta non segmentata', {sticky:true});
+                mapLayers.push(gl);
+              }
+              seg = [];
+            }
+          }
+          if (seg.length > 2) {
+            const gl = L.polyline(seg, {color:'#f5c400', weight:3, opacity:.8,
+              dashArray:'8,5'}).addTo(map);
+            gl.bindTooltip('Tratta non segmentata', {sticky:true});
+            mapLayers.push(gl);
+          }
+        }
+
+        if (!efforts.length) {
+          if (panMode) map.panTo(gpxLayer.getBounds().getCenter());
+          else map.fitBounds(gpxLayer.getBounds(), {padding:[30,30]});
+        }
+      }
+    } catch(ex) { console.warn('GPX track load failed:', ex); }
+  }
+
+  // 3. Segmenti Strava in arancio sopra
+  efforts.forEach(e => {
+    if (!e.polyline) return;
+    try {
+      const coords = decodePolyline(e.polyline).map(c=>[c[0],c[1]]);
+      const effortColor = e.source==='historical' ? '#40b4e0'
+                        : e.source==='auto'       ? '#6ab06a'
+                        : '#fc4c02'; // strava_api
+      const isDimmed = activeSegId && e.segment_id !== activeSegId;
+      const layer = L.polyline(coords, {color:effortColor, weight:isDimmed?2:3, opacity:isDimmed?.35:.85})
+        .addTo(map).bindTooltip(e.name, {sticky:true});
+      layer.on('click', () => selectSegment(e.segment_id));
+      mapLayers.push(layer);
+    } catch(ex){}
+  });
+
+  if (efforts.length) {
+    const segLayers = mapLayers.filter(l => l.options && l.options.color === '#fc4c02');
+    if (segLayers.length) {
+      const group = L.featureGroup(segLayers);
+      if (panMode) map.panTo(group.getBounds().getCenter());
+      else map.fitBounds(group.getBounds(), {padding:[30,30]});
+    }
+  }
+}
+
+// ── SEGMENT DETAIL ────────────────────────────────────────────────
+async function selectSegment(segId) {
+  activeSegmentId = segId;
+
+  // Evidenzia riga tree attiva
+  document.querySelectorAll('.tree-seg').forEach(c =>
+    c.classList.toggle('active', +c.dataset.id===segId));
+
+  // Evidenzia layer sulla mappa
+  const effort = currentEfforts.find(e => e.segment_id===segId);
+  clearMapLayers();
+  showEffortsOnMap(currentEfforts, segId);  // passa segId per attenuare gli altri
+  if (effort && effort.polyline) {
+    try {
+      const coords = decodePolyline(effort.polyline).map(c=>[c[0],c[1]]);
+      // Alone bianco sotto
+      const hl0 = L.polyline(coords, {color:'#fff', weight:9, opacity:.6}).addTo(map);
+      // Bordo giallo acceso sopra
+      const hl1 = L.polyline(coords, {color:'#ffe000', weight:5, opacity:1}).addTo(map);
+      mapLayers.push(hl0, hl1);
+      mapFocusLayer(hl0);
+    } catch(ex){}
+  }
+
+  // Carica storico
+  document.getElementById('right-seg-name').textContent = effort ? effort.name : '—';
+  document.getElementById('right-body').innerHTML = '<div style="padding:24px;text-align:center;color:var(--text2)">Caricamento…</div>';
+  document.getElementById('right').classList.add('open');
+
+  try {
+    const history = await api(`/api/segments/${segId}/efforts`);
+    renderSegmentHistory(effort, history);
+  } catch(e) {
+    document.getElementById('right-body').innerHTML = `<div style="padding:16px;color:var(--orange)">Errore: ${e.message}</div>`;
+  }
+}
+
+function _segExtraStats(best, seg) {
+  const vamBest = best.vam;
+  let wattBest = null;
+  try {
+    // Pendenza: preferisci avg_grade_pct dell'effort, poi calcola da elev/dist
+    const grade = seg ? (seg.avg_grade_pct || best.avg_grade_pct || 0) : (best.avg_grade_pct || 0);
+    // Solo tratti in salita (pendenza > 0)
+    if (grade > 0) {
+      const m   = +(appSettings.weight_kg||75) + +(appSettings.bike_kg||10);
+      const crr = +(appSettings.crr||0.005);
+      const cda = +(appSettings.cda||0.35);
+      const d   = (seg ? (seg.distance_m||seg.distance) : best.distance_m) || 0;
+      const t   = best.elapsed_seconds || 0;
+      // Dislivello da pendenza × distanza (più affidabile di elev_difference)
+      const el  = grade / 100 * d;
+      if (d > 0 && t > 0 && el > 0) {
+        const v = d/t;
+        const slope = el/d;
+        const fg = m*9.81*Math.sin(Math.atan(slope));
+        const fr = m*9.81*Math.cos(Math.atan(slope))*crr;
+        const fa = 0.5*1.225*cda*v*v;
+        wattBest = Math.round((fg+fr+fa)*v);
+      }
+    }
+  } catch(e) {}
+  if (!vamBest && !wattBest) return '';
+  const cells = [];
+  if (vamBest)  cells.push('<div class="stat-cell"><div class="label">VAM best</div><div class="value" style="color:var(--orange)">&#9650;'+vamBest+' m/h</div></div>');
+  if (wattBest) cells.push('<div class="stat-cell"><div class="label">Watt stimati</div><div class="value" style="color:var(--orange)">'+wattBest+' W</div></div>');
+  return '<div class="seg-stats-bar" style="grid-template-columns:repeat('+cells.length+',1fr)">'+cells.join('')+'</div>';
+}
+
+function renderSegmentHistory(seg, efforts) {
+  if (!efforts.length) {
+    document.getElementById('right-body').innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--text2)">Nessun effort storico.</div>';
+    return;
+  }
+  const best = efforts[0];
+  const dist = seg && seg.distance_m >= 1000
+    ? (seg.distance_m/1000).toFixed(2)+' km' : (seg ? Math.round(seg.distance_m)+' m' : '—');
+  const grade = seg && seg.avg_grade_pct
+    ? (seg.avg_grade_pct>0?'+':'')+seg.avg_grade_pct.toFixed(1)+'%' : '—';
+
+  let html = `
+  <div class="seg-stats-bar">
+    <div class="stat-cell"><div class="label">Distanza</div><div class="value">${dist}</div></div>
+    <div class="stat-cell"><div class="label">Pendenza</div><div class="value">${grade}</div></div>
+    <div class="stat-cell"><div class="label">Best time</div><div class="value" style="color:var(--gold)">${formatTime(best.elapsed_seconds)}</div></div>
+  </div>
+  ${_segExtraStats(best, seg)}
+  <div class="chart-section">
+    <div class="section-title">Andamento nel tempo</div>
+    <div class="chart-container"><canvas id="speed-chart"></canvas></div>
+  </div>
+  <div class="efforts-section">
+    <div class="section-title">Storico (${efforts.length} effort)</div>
+    <table class="efforts-table">
+      <thead><tr><th>#</th><th>Data</th><th>Tempo</th><th>km/h</th><th>VAM</th><th>Δ best</th></tr></thead>
+      <tbody>${efforts.map(e => {
+        const rc = e.rank<=3 ? `rank-${e.rank}` : 'rank-n';
+        const delta = e.rank===1
+          ? '<span class="delta-best is-best">🏆</span>'
+          : `<span class="delta-best">+${formatTime(e.delta_from_best)}</span>`;
+        const date = e.activity_date ? e.activity_date.slice(0,10) : '—';
+        const vamTd = e.vam ? `<td style="color:var(--orange);font-size:11px">▲${e.vam}</td>` : '<td style="color:var(--text2)">—</td>';
+        const isCurrent = e.activity_id === currentActivityId;
+        return `<tr class="${isCurrent?'cur-act-row':''}" data-aid="${e.activity_id}">
+          <td><span class="rank-badge ${rc}">${e.rank}</span></td>
+          <td style="font-size:11px;color:var(--text2)">${date}</td>
+          <td style="font-weight:600">${formatTime(e.elapsed_seconds)}</td>
+          <td>${(e.avg_speed_kmh||0).toFixed(1)}</td>
+          ${vamTd}
+          <td>${delta}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+  </div>`;
+
+  // Aggiungi note dell'attività corrente in fondo al pannello
+  const act = allActivities.find(a => a.activity_id === currentActivityId);
+  if (act !== undefined) {
+    html += `<div class="notes-panel">
+      <div class="section-title" style="padding:10px 14px 4px">Note uscita</div>
+      <div style="padding:0 14px 14px">
+        <textarea class="act-notes-area detail-notes" data-id="${act.activity_id}"
+          placeholder="Note sull'uscita…">${act.notes||''}</textarea>
+        <div class="notes-saved" id="ns-${act.activity_id}"></div>
+      </div>
+    </div>`;
+  }
+  document.getElementById('right-body').innerHTML = html;
+  // Collega evento save sulla textarea nel pannello
+  const detailTa = document.querySelector('.detail-notes');
+  if (detailTa) attachNotesSave(detailTa);
+  requestAnimationFrame(() => {
+    const cur = document.querySelector('.cur-act-row');
+    if (cur) cur.scrollIntoView({block:'nearest',behavior:'smooth'});
+    renderTrendChart(efforts);
+  });
+}
+
+function renderTrendChart(efforts) {
+  if (speedChart) { speedChart.destroy(); speedChart = null; }
+  const ctx = document.getElementById('speed-chart');
+  if (!ctx) return;
+
+  const sorted = [...efforts].sort((a,b) => {
+    const da = a.activity_date||a.filename, db = b.activity_date||b.filename;
+    return da<db?-1:da>db?1:0;
+  });
+  const labels = sorted.map(e => e.activity_date ? e.activity_date.slice(0,10) : '—');
+  const times  = sorted.map(e => +(e.elapsed_seconds/60).toFixed(2));
+
+  if (times.length < 2) return;
+
+  speedChart = new Chart(ctx, {
+    type:'line',
+    data:{
+      labels,
+      datasets:[
+        {label:'Tempo',data:times,borderColor:'#fc4c02',backgroundColor:'rgba(252,76,2,.12)',
+         borderWidth:2,pointRadius:4,pointBackgroundColor:'#fc4c02',tension:.3,fill:true}
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{label:ctx=>ctx.datasetIndex===0?formatTime(sorted[ctx.dataIndex].elapsed_seconds):null}}
+      },
+      scales:{
+        x:{ticks:{color:'#8b90b0',font:{size:10},maxRotation:30},grid:{color:'#2e3148'}},
+        y:{reverse:true,ticks:{color:'#8b90b0',font:{size:10},callback:v=>{const m=Math.floor(v);const s=Math.round((v-m)*60);return m+':'+(s<10?'0':'')+s;}},grid:{color:'#2e3148'}}
+      }
+    }
+  });
+}
+
+// .seg-delete → elimina segmento
+document.getElementById('act-list').addEventListener('click', async e => {
+  const btn = e.target.closest('.seg-delete');
+  if (!btn) return;
+  e.stopPropagation();
+  const segId = btn.dataset.segId;
+  const segName = btn.closest('.tree-seg')?.querySelector('.tree-seg-name')?.textContent || segId;
+  if (!confirm(`Eliminare segmento "${segName}" e tutti i suoi effort storici?`)) return;
+  await api(`/api/segments/${segId}`, {method:'DELETE'});
+  currentEfforts = currentEfforts.filter(ef => String(ef.segment_id) !== String(segId));
+  if (currentActivityId) {
+    populateTree(currentActivityId, currentEfforts);
+    clearMapLayers();
+    showEffortsOnMap(currentEfforts);
+  }
+  await Promise.all([loadStatus(), loadActivities()]);
+}, true);
+
+// .act-delete → elimina attività (listener globale su act-list)
+document.getElementById('act-list').addEventListener('click', async e => {
+  const btn = e.target.closest('.act-delete');
+  if (!btn) return;
+  e.stopPropagation();
+  const id = +btn.dataset.id;
+  const act = allActivities.find(a => a.activity_id === id);
+  const name = act ? (act.activity_name || act.filename) : `#${id}`;
+  if (!confirm(`Eliminare "${name}" e tutti i suoi effort?`)) return;
+  await api(`/api/activities/${id}`, {method:'DELETE'});
+  if (currentActivityId === id) {
+    currentActivityId = null;
+    document.getElementById('right').classList.remove('open');
+    setTimeout(() => map && map.invalidateSize({animate:true}), 260);
+  }
+  clearMapLayers();
+  await Promise.all([loadStatus(), loadActivities()]);
+}, true); // capture=true per intercettare prima del listener selectActivity
+
+document.getElementById('right-close').addEventListener('click', () => {
+  document.getElementById('right').classList.remove('open');
+  activeSegmentId = null;
+  currentActivityId = null;
+  document.querySelectorAll('.tree-seg').forEach(c=>c.classList.remove('active'));
+  document.querySelectorAll('.act-item').forEach(c=>c.classList.remove('active'));
+  clearMapLayers();
+  if (currentEfforts.length) showEffortsOnMap(currentEfforts);
+  // Ridimensiona la mappa dopo la transizione CSS (250ms)
+  setTimeout(() => { if (map) map.invalidateSize({animate:true}); }, 260);
+});
+
+// ── IMPORT ────────────────────────────────────────────────────────
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const overlay   = document.getElementById('import-overlay');
+const progress  = document.getElementById('import-progress');
+
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => importFiles(e.target.files));
+document.getElementById('btn-import').addEventListener('click', () => {
+  overlay.style.display='flex'; progress.style.display='none'; dropZone.style.display='';
+});
+overlay.addEventListener('dragover', e=>{e.preventDefault();dropZone.classList.add('drag-over')});
+overlay.addEventListener('dragleave', ()=>dropZone.classList.remove('drag-over'));
+overlay.addEventListener('drop', e=>{e.preventDefault();dropZone.classList.remove('drag-over');importFiles(e.dataTransfer.files)});
+
+let _pendingImportResults = [];
+
+async function importFiles(files) {
+  if (!files.length) return;
+  dropZone.style.display='none'; progress.style.display='block';
+  const fd = new FormData();
+  Array.from(files).forEach(f=>fd.append('gpx',f));
+  document.getElementById('import-msg').textContent=`Importazione di ${files.length} file…`;
+  try {
+    const resp = await fetch(`${API}/api/import`,{method:'POST',body:fd});
+    _pendingImportResults = await resp.json();
+    const errors = _pendingImportResults.filter(r=>r.error);
+    if (errors.length) {
+      alert(errors.map(r=>`❌ ${r.filename}: ${r.error}`).join('\n'));
+    }
+  } catch(e) { alert('Errore: '+e.message); _pendingImportResults=[]; }
+  overlay.style.display='none'; progress.style.display='none'; dropZone.style.display='';
+  await Promise.all([loadStatus(), loadActivities()]);
+  // Se c'è almeno un'attività importata con successo, proponi associazione Strava
+  const ok = _pendingImportResults.filter(r=>!r.error && r.activity_id);
+  for (const r of ok) {
+    await tryAutoMatchStrava(r.activity_id, r.filename);
+  }
+  _pendingImportResults = [];
+}
+
+async function tryAutoMatchStrava(activityId, filename) {
+  // Cerca automaticamente l'activity ID Strava per nome file
+  try {
+    const res = await fetch(`${API}/api/strava/match-activity`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({filename})
+    });
+    const data = await res.json();
+    if (data.strava_id) {
+      // Match trovato — fetch effort automatico senza dialog
+      const statusEl = document.getElementById('fs-' + activityId);
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text2)">⟳ Match Strava trovato (${data.name}), importo effort…</span>`;
+      const r2 = await fetch(`${API}/api/activities/${activityId}/strava-efforts`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({strava_activity_id: data.strava_id})
+      });
+      const d2 = await r2.json();
+      if (d2.error) throw new Error(d2.error);
+      const act = allActivities.find(a => a.activity_id === activityId);
+      if (act) { act.strava_effort_source = 'strava_api'; act.strava_activity_id = data.strava_id; }
+      await Promise.all([loadStatus(), loadActivities()]);
+      if (currentActivityId === activityId) {
+        const efforts = await api(`/api/activities/${activityId}/efforts`);
+        currentEfforts = efforts;
+        populateTree(activityId, efforts);
+        clearMapLayers(); showEffortsOnMap(efforts);
+      }
+      return; // match automatico riuscito, nessun dialog
+    }
+  } catch(e) {
+    console.warn('Auto-match Strava fallito:', e);
+  }
+  // Nessun match automatico — mostra dialog manuale
+  showStravaLinkDialog(activityId);
+}
+
+function showStravaLinkDialog(activityId) {
+  document.getElementById('strava-link-id').value = '';
+  document.getElementById('strava-link-modal').classList.add('open');
+  document.getElementById('strava-link-modal')._activityId = activityId;
+}
+
+document.getElementById('strava-link-skip').addEventListener('click', () => {
+  document.getElementById('strava-link-modal').classList.remove('open');
+  _pendingImportResults = [];
+});
+
+document.getElementById('strava-link-confirm').addEventListener('click', async () => {
+  const modal = document.getElementById('strava-link-modal');
+  const actId = modal._activityId;
+  const stravaId = document.getElementById('strava-link-id').value.trim();
+  modal.classList.remove('open');
+  if (!stravaId || !actId) { _pendingImportResults=[]; return; }
+  // Usa l'endpoint strava-efforts già esistente
+  const statusEl = document.getElementById('fs-' + actId);
+  try {
+    const res = await fetch(`${API}/api/activities/${actId}/strava-efforts`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({strava_activity_id: +stravaId})
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    // Aggiorna UI
+    const act = allActivities.find(a=>a.activity_id===actId);
+    if (act) { act.strava_effort_source='strava_api'; act.strava_activity_id=+stravaId; }
+    await Promise.all([loadStatus(), loadActivities()]);
+    if (currentActivityId === actId) {
+      const efforts = await api(`/api/activities/${actId}/efforts`);
+      currentEfforts = efforts;
+      populateTree(actId, efforts);
+      clearMapLayers(); showEffortsOnMap(efforts);
+    }
+  } catch(e) { alert('Errore fetch effort Strava: '+e.message); }
+  _pendingImportResults=[];
+});
+
+// ── EVENT DELEGATION su #act-list (una volta sola) ──────────────
+document.getElementById('act-list').addEventListener('click', async e => {
+  // .tree-seg → selectSegment
+  const treeSeg = e.target.closest('.tree-seg');
+  if (treeSeg) {
+    e.stopPropagation();
+    selectSegment(+treeSeg.dataset.id);
+    return;
+  }
+  // .act-expand → toggle tree
+  const expand = e.target.closest('.act-expand');
+  if (expand) {
+    e.stopPropagation();
+    const id = +expand.dataset.expand;
+    const tree = document.getElementById('tree-' + id);
+    const isOpen = tree && tree.classList.contains('open');
+    if (tree) tree.classList.toggle('open', !isOpen);
+    expand.classList.toggle('open', !isOpen);
+    return;
+  }
+  // .fetch-btn → fetch effort strava
+  const fetchBtn = e.target.closest('.fetch-btn');
+  if (fetchBtn) {
+    e.stopPropagation();
+    if (fetchBtn.disabled) return;
+    const id = +fetchBtn.dataset.id;
+    const input = document.querySelector(`.strava-id-input[data-id="${id}"]`);
+    const statusEl = document.getElementById('fs-' + id);
+    const stravaId = input ? input.value.trim() : '';
+    if (!stravaId) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">⚠ Inserisci l'ID attività Strava</span>`;
+      return;
+    }
+    fetchBtn.disabled = true;
+    const act0 = allActivities.find(a => a.activity_id===id);
+    const actName = act0 ? (act0.activity_name || act0.filename) : `#${id}`;
+    if (statusEl) statusEl.innerHTML = '<span>⟳ Fetching…</span>';
+    syncLogStart(id, actName);
+    try {
+      const res = await fetch(`${API}/api/activities/${id}/strava-efforts`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({strava_activity_id: +stravaId})
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      syncLogDone(id, `✓ ${actName}: ${data.saved} segmenti`, false);
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">✓ ${data.saved} effort importati da Strava</span>`;
+      fetchBtn.textContent = '⟳ Strava'; fetchBtn.style.background = 'var(--green)';
+      const act = allActivities.find(a => a.activity_id===id);
+      if (act) {
+        act.strava_effort_source  = 'strava_api';
+        act.strava_activity_id    = +stravaId;
+        act.strava_effort_count   = (act.strava_effort_count || 0) + data.saved;
+        act.effort_count          = (act.effort_count || 0) + data.saved;
+      }
+      // Ricarica lista per aggiornare badge
+      await loadActivities();
+      if (currentActivityId === id) {
+        const efforts = await api(`/api/activities/${id}/efforts`);
+        currentEfforts = efforts; populateTree(id, efforts);
+        clearMapLayers(); showEffortsOnMap(efforts);
+      }
+      await loadStatus();
+    } catch(err) {
+      syncLogDone(id, `⚠ ${actName}: ${err.message}`, true);
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">⚠ ${err.message}</span>`;
+    }
+    fetchBtn.disabled = false;
+    return;
+  }
+  // .act-item → selectActivity (solo se non note o input)
+  const actItem = e.target.closest('.act-item');
+  if (actItem) {
+    if (e.target.classList.contains('act-notes-area')) return;
+    if (e.target.classList.contains('strava-id-input')) return;
+    selectActivity(+actItem.dataset.id);
+  }
+});
+
+// Stoppa propagazione su textarea e input (non blocca il delegation sopra)
+document.getElementById('act-list').addEventListener('click', e => {
+  if (e.target.classList.contains('act-notes-area') ||
+      e.target.classList.contains('strava-id-input')) {
+    e.stopPropagation();
+  }
+}, true); // capture phase
+
+// ── STRAVA SYNC ───────────────────────────────────────────────────
+let stravaActivities=[];
+document.getElementById('btn-sync-strava').addEventListener('click',openSyncModal);
+document.getElementById('sync-close').addEventListener('click',closeSyncModal);
+document.getElementById('sync-cancel').addEventListener('click',closeSyncModal);
+document.getElementById('sync-modal').addEventListener('click',e=>{if(e.target===document.getElementById('sync-modal'))closeSyncModal()});
+document.getElementById('sync-select-all').addEventListener('click',()=>{
+  document.querySelectorAll('.strava-act-row:not(.imported) input[type=checkbox]').forEach(cb=>cb.checked=true);
+  updateSyncCount();
+});
+
+function openSyncModal(){document.getElementById('sync-modal').classList.add('open');loadStravaActivities()}
+function closeSyncModal(){document.getElementById('sync-modal').classList.remove('open')}
+
+async function loadStravaActivities(){
+  document.getElementById('sync-body').innerHTML='<div id="sync-status">Caricamento attività da Strava…</div>';
+  document.getElementById('sync-open-strava').style.display='none';
+  try {
+    stravaActivities = await api('/api/strava/activities');
+    renderStravaList();
+  } catch(e) {
+    document.getElementById('sync-body').innerHTML=
+      `<div id="sync-status" style="color:var(--orange)">⚠ ${e.message}<br><small>Esegui: python run.py auth login</small></div>`;
+  }
+}
+
+function renderStravaList(){
+  const body=document.getElementById('sync-body');
+  if(!stravaActivities.length){body.innerHTML='<div id="sync-status">Nessuna attività.</div>';return}
+  body.innerHTML=stravaActivities.map(a=>{
+    const date=a.start_date?a.start_date.slice(0,10):'—';
+    const dist=(a.distance_m/1000).toFixed(1);
+    const ele=Math.round(a.elevation_m);
+    return `<div class="strava-act-row ${a.imported?'imported':''}" data-id="${a.strava_id}">
+      <input type="checkbox" ${a.imported?'disabled checked':''} data-id="${a.strava_id}" onchange="updateSyncCount()">
+      <div class="strava-act-info">
+        <div class="strava-act-name">${a.name}</div>
+        <div class="strava-act-meta">${date} · ${dist} km · +${ele} m · ${a.sport_type}</div>
+      </div>
+      ${a.imported?'<span class="imported-badge">✓</span>':''}
+      <a class="strava-link" href="https://www.strava.com/activities/${a.strava_id}" target="_blank">↗</a>
+    </div>`;
+  }).join('');
+  updateSyncCount();
+  document.getElementById('sync-open-strava').style.display='inline-block';
+  document.getElementById('sync-open-strava').onclick=()=>window.open('https://www.strava.com/athlete/training','_blank');
+}
+
+document.getElementById('sync-import-selected').addEventListener('click', async () => {
+  const checked = [...document.querySelectorAll('.strava-act-row:not(.imported) input[type=checkbox]:checked')];
+  if (!checked.length) return;
+  const btn = document.getElementById('sync-import-selected');
+  btn.disabled = true;
+  btn.textContent = '⟳ Importazione…';
+  let done=0, errors=0;
+  for (const cb of checked) {
+    const row = cb.closest('.strava-act-row');
+    const stravaId = +cb.dataset.id;
+    const act = stravaActivities.find(a=>a.strava_id===stravaId);
+    const sport = act ? act.sport_type.toLowerCase() : 'cycling';
+    const actType = sport.includes('run') ? 'running' : 'cycling';
+    try {
+      const res = await fetch(`${API}/api/strava/import-activity`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({strava_activity_id: stravaId, activity_type: actType})
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      row.classList.add('imported');
+      cb.checked=true; cb.disabled=true;
+      row.querySelector('.strava-act-info').insertAdjacentHTML('beforeend',
+        `<div style="font-size:10px;color:var(--green);margin-top:2px">✓ ${data.strava_efforts} effort · ${(data.gpx_stats.total_distance_m/1000).toFixed(1)}km</div>`);
+      if (act) act.imported=true;
+      done++;
+    } catch(e) {
+      row.querySelector('.strava-act-info').insertAdjacentHTML('beforeend',
+        `<div style="font-size:10px;color:var(--orange);margin-top:2px">⚠ ${e.message}</div>`);
+      errors++;
+    }
+    updateSyncCount();
+  }
+  btn.disabled=false;
+  btn.textContent=`⬇ Importa da Strava`;
+  await Promise.all([loadStatus(), loadActivities()]);
+});
+
+function updateSyncCount(){
+  const checked=document.querySelectorAll('.strava-act-row:not(.imported) input[type=checkbox]:checked').length;
+  document.getElementById('sync-import-selected').style.display = checked>0 ? 'inline-block' : 'none';
+  const imported=stravaActivities.filter(a=>a.imported).length;
+  document.getElementById('sync-count').innerHTML=
+    checked>0?`<b style="color:var(--orange)">${checked}</b> da scaricare · ${imported}/${stravaActivities.length} già importate`
+    :`${imported}/${stravaActivities.length} già importate`;
+}
+
+// ── UTILS ─────────────────────────────────────────────────────────
+function formatTime(s){
+  if(!s&&s!==0)return'N/A';
+  s=Math.round(s);const m=Math.floor(s/60),sec=s%60,h=Math.floor(m/60),min=m%60;
+  if(h>0)return`${h}h ${String(min).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`;
+  return`${min}m ${String(sec).padStart(2,'0')}s`;
+}
+function decodePolyline(str){
+  let i=0,lat=0,lng=0,r=[];
+  while(i<str.length){
+    let b,s=0,res=0;
+    do{b=str.charCodeAt(i++)-63;res|=(b&0x1f)<<s;s+=5}while(b>=0x20);
+    lat+=(res&1)?~(res>>1):(res>>1);s=res=0;
+    do{b=str.charCodeAt(i++)-63;res|=(b&0x1f)<<s;s+=5}while(b>=0x20);
+    lng+=(res&1)?~(res>>1):(res>>1);
+    r.push([lat/1e5,lng/1e5]);
+  }
+  return r;
+}
+
+
+// ── INIT ──────────────────────────────────────────────────────────
+(async()=>{
+  await Promise.all([loadStatus(), loadActivities(), loadSettings()]);
+  loadRateLimit();
+  startSSELog();
+  // Automatch in background — non blocca il rendering
+  setTimeout(async () => {
+    try {
+      const r = await fetch(`${API}/api/strava/automatch`, {method:'POST'});
+      const d = await r.json();
+      if (d.matched > 0) {
+        console.log(`Automatch: ${d.matched} attività agganciate a Strava`);
+        await loadActivities();
+        const freshActs = await api('/api/activities');
+        for (const a of freshActs) {
+          if (a.strava_activity_id && a.strava_effort_source !== 'strava_api') {
+            try {
+              await fetch(`${API}/api/activities/${a.activity_id}/strava-efforts`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({strava_activity_id: a.strava_activity_id})
+              });
+            } catch(e) { console.warn(`Effort fetch fallito per ${a.filename}:`, e); }
+          }
+        }
+        await Promise.all([loadStatus(), loadActivities()]);
+      }
+    } catch(e) { /* silenzioso se non autenticato */ }
+  }, 500);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+strava:
+  client_id: "210949"
+  client_secret: "64547fe8ee798dd147818a7f61726025a15c6b14"
+  access_token: "63e7f727690d64429f277eff7d38c69f0cfdb810"
+  chunk_km: 5.0   # lunghezza chunk per parametrizzazione curvilinea
+  rate_limit_priority: "medium"   # default consigliato
+  rate_limit:
+    requests_per_15min: 200
+    requests_per_day: 2000
+
+cache:
+  db_path: "./cache/segments.db"
+  # Dimensione celle per il tiling della bbox in gradi (~1.1km a 45° lat)
+  tile_size_deg: 0.01
+  # Overlap tra celle adiacenti per non perdere segmenti ai bordi
+  tile_overlap: 0.002
+
+# Algoritmo di matching segmento su traccia GPX
+matching:
+  # Raggio (metri) entro cui cercare start/end del segmento sulla traccia
+  proximity_radius_m: 50
+  # Fréchet distance massima accettabile (metri) per considerare un match valido
+  max_frechet_distance_m: 50
+  # Fraction minima del segmento che deve essere "coperta" dalla traccia
+  min_coverage_ratio: 0.85
+
+# Rilevamento automatico segmenti (attivo se Strava non restituisce risultati)
+auto_detect:
+  enabled: true
+
+  climb:
+    # Dislivello positivo minimo del segmento (metri)
+    min_elevation_gain_m: 20
+    # Pendenza media minima (%) per classificare un tratto come salita
+    min_avg_grade_pct: 3.0
+    # Pendenza minima istantanea per iniziare a "contare" una salita
+    min_grade_threshold_pct: 1.5
+    # Lunghezza minima del segmento (metri)
+    min_length_m: 200
+    # Finestra di smoothing elevazione (numero di punti) — riduce il rumore GPS
+    elevation_smoothing_window: 7
+
+  descent:
+    enabled: true
+    min_elevation_loss_m: 20
+    min_avg_grade_pct: 3.0
+    min_length_m: 200
+    elevation_smoothing_window: 7
+
+  flat:
+    # Rilevamento di sprint/tratti pianeggianti significativi
+    enabled: false
+    min_length_m: 500
+    max_avg_grade_pct: 1.5
+
+  # Separazione minima tra due segmenti auto-rilevati (evita overlap eccessivi)
+  min_gap_between_segments_m: 50
