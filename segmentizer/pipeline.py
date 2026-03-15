@@ -7,7 +7,7 @@ import os
 import yaml
 import gpxpy
 
-from cache.db import SegmentCache, CachedSegment, Effort
+from cache.db import SegmentCache, CachedSegment, Effort, resolve_cache_db_path
 from utils.gpx_utils import parse_gpx_points, compute_distances
 from auto_detect.detector import AutoSegmentDetector
 from matcher.frechet import SegmentMatcher
@@ -23,7 +23,7 @@ class Segmentizer:
         else:
             with open(config_path or "config.yml") as f:
                 self.config = yaml.safe_load(f)
-        self.cache = SegmentCache(self.config["cache"]["db_path"])
+        self.cache = SegmentCache(str(resolve_cache_db_path(self.config.get("cache", {}))))
 
     def process(self, gpx_path, activity_type="cycling",
                 filename_override=None, strava_activity_id=None):

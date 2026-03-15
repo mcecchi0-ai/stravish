@@ -16,10 +16,39 @@ Changelog:
 from typing import List, Optional
 import sqlite3
 import logging
+import os
 from pathlib import Path
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+def resolve_cache_db_path(cache_cfg) -> Path:
+    """Risolvi il path DB cache da config.
+
+    Supporta:
+    - cache.db_path
+    - cache.db_external_dir (+ opzionale cache.db_filename, default segments.db)
+    """
+    if isinstance(cache_cfg, str):
+        raw = cache_cfg
+    else:
+        cache_cfg = cache_cfg or {}
+        ext_dir = cache_cfg.get("db_external_dir")
+        if ext_dir:
+            fname = cache_cfg.get("db_filename", "segments.db")
+            raw = str(Path(ext_dir) / fname)
+        else:
+            raw = cache_cfg.get("db_path", "./cache/segments.db")
+
+    raw = os.path.expandvars(str(raw))
+    p = Path(raw).expanduser()
+
+    # Se viene passato solo una directory, usa filename di default.
+    if p.suffix == "" and (str(p).endswith(os.sep) or p.is_dir()):
+        p = p / "segments.db"
+
+    return p
+
 
 
 @dataclass
@@ -297,6 +326,25 @@ class SegmentCache:
         self._conn.execute(
             "UPDATE activities SET gpx_points=?, stream_length=? WHERE activity_id=?",
             (gpx_points_json, stream_length, activity_id)
+        )
+        self._conn.commit()
+
+    def update_activity_totals(self, activity_id, total_distance_m=None, total_elevation_m=None):
+        """Aggiorna distanza/dislivello totale dell'attività."""
+        updates = []
+        values = []
+        if total_distance_m is not None:
+            updates.append("total_distance_m=?")
+            values.append(float(total_distance_m))
+        if total_elevation_m is not None:
+            updates.append("total_elevation_m=?")
+            values.append(float(total_elevation_m))
+        if not updates:
+            return
+        values.append(activity_id)
+        self._conn.execute(
+            f"UPDATE activities SET {', '.join(updates)} WHERE activity_id=?",
+            tuple(values)
         )
         self._conn.commit()
 

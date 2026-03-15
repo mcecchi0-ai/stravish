@@ -10,6 +10,9 @@ strava:
 
 cache:
   db_path: "./cache/segments.db"
+  # Alternativa: DB esterno (usa automaticamente segments.db + -shm + -wal)
+  # db_external_dir: "/percorso/esterno/cartella_db"
+  # db_filename: "segments.db"
   # Dimensione celle per il tiling della bbox in gradi (~1.1km a 45° lat)
   tile_size_deg: 0.01
   # Overlap tra celle adiacenti per non perdere segmenti ai bordi

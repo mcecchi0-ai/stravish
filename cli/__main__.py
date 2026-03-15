@@ -231,14 +231,14 @@ def _print_results(results, filename):
 # ------------------------------------------------------------------
 
 def cmd_cache_stats(args, config):
-    from cache.db import SegmentCache
-    cache = SegmentCache(config["cache"]["db_path"])
+    from cache.db import SegmentCache, resolve_cache_db_path
+    cache = SegmentCache(str(resolve_cache_db_path(config.get("cache", {}))))
     conn = cache._conn
     total  = conn.execute("SELECT COUNT(*) FROM segments").fetchone()[0]
     strava = conn.execute("SELECT COUNT(*) FROM segments WHERE source='strava'").fetchone()[0]
     auto   = conn.execute("SELECT COUNT(*) FROM segments WHERE source='auto'").fetchone()[0]
     tiles  = conn.execute("SELECT COUNT(*) FROM fetched_tiles").fetchone()[0]
-    db_path = Path(config["cache"]["db_path"])
+    db_path = resolve_cache_db_path(config.get("cache", {}))
     db_size = db_path.stat().st_size / 1024 if db_path.exists() else 0
     print("\n📦 Cache: {}".format(config["cache"]["db_path"]))
     print("   Segmenti : {}  (Strava: {} | auto: {})".format(total, strava, auto))
@@ -248,12 +248,12 @@ def cmd_cache_stats(args, config):
 
 
 def cmd_cache_clear(args, config):
-    from cache.db import SegmentCache
+    from cache.db import SegmentCache, resolve_cache_db_path
     confirm = input("⚠️  Cancellare tutta la cache? [s/N] ").strip().lower()
     if confirm != "s":
         print("Operazione annullata.")
         return
-    cache = SegmentCache(config["cache"]["db_path"])
+    cache = SegmentCache(str(resolve_cache_db_path(config.get("cache", {}))))
     cache._conn.execute("DELETE FROM segments")
     cache._conn.execute("DELETE FROM fetched_tiles")
     cache._conn.execute("DELETE FROM efforts")
