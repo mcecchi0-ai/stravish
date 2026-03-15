@@ -39,17 +39,21 @@ logger = logging.getLogger(__name__)
 
 # ── Log stream per SSE ────────────────────────────────────────────
 import queue as _queue
+from collections import deque as _deque
 logging.basicConfig(level=logging.INFO)
 _log_queue = _queue.Queue(maxsize=500)
+_log_history = _deque(maxlen=500)
 
 class _QueueHandler(logging.Handler):
     def emit(self, record):
         try:
-            _log_queue.put_nowait({
+            entry = {
                 "level": record.levelname,
                 "msg":   self.format(record),
                 "ts":    record.created,
-            })
+            }
+            _log_history.append(entry)
+            _log_queue.put_nowait(entry)
         except _queue.Full:
             pass
 
@@ -157,19 +161,32 @@ def api_status():
 def api_activities():
     activities = get_cache().get_all_activities()
     c = get_cache()._conn
-    # Conta effort totali, Strava e auto separatamente
-    all_counts    = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts GROUP BY activity_id"
-    ).fetchall()}
-    strava_counts = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts WHERE source='strava_api' GROUP BY activity_id"
-    ).fetchall()}
-    auto_counts   = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts WHERE source='auto' GROUP BY activity_id"
-    ).fetchall()}
-    hist_counts   = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts WHERE source='historical' GROUP BY activity_id"
-    ).fetchall()}
+    # Conta effort "effettivi" per attività con priorità locale > strava_api
+    # (se lo stesso segmento esiste in entrambe le sorgenti, mostra solo il locale).
+    rows = c.execute(
+        "SELECT activity_id, segment_id, source FROM efforts"
+    ).fetchall()
+    local_sources = {"historical", "auto", "frechet"}
+    chosen = {}
+    for r in rows:
+        key = (r[0], r[1])
+        src = r[2]
+        prev = chosen.get(key)
+        if prev is None:
+            chosen[key] = src
+            continue
+        if prev == 'strava_api' and src in local_sources:
+            chosen[key] = src
+
+    all_counts, strava_counts, auto_counts, hist_counts = {}, {}, {}, {}
+    for (aid, _sid), src in chosen.items():
+        all_counts[aid] = all_counts.get(aid, 0) + 1
+        if src == 'strava_api':
+            strava_counts[aid] = strava_counts.get(aid, 0) + 1
+        elif src == 'auto':
+            auto_counts[aid] = auto_counts.get(aid, 0) + 1
+        elif src in {'historical', 'frechet'}:
+            hist_counts[aid] = hist_counts.get(aid, 0) + 1
     for a in activities:
         aid = a["activity_id"]
         a["effort_count"]           = all_counts.get(aid, 0)
@@ -229,6 +246,13 @@ def api_logs_stream():
     """SSE endpoint — streamma i log in tempo reale."""
     def generate():
         yield "retry: 1000\n\n"
+        for entry in list(_log_history):
+            level = entry["level"]
+            msg   = entry["msg"].replace("\n", " ↵ ")
+            import datetime, json as _json
+            ts = datetime.datetime.fromtimestamp(entry["ts"]).strftime("%H:%M:%S")
+            data = _json.dumps({"level": level, "msg": msg, "ts": ts})
+            yield f"data: {data}\n\n"
         while True:
             try:
                 entry = _log_queue.get(timeout=15)
@@ -396,6 +420,40 @@ def api_activity_medals(activity_id):
     return jsonify(medals)
 
 
+@app.route("/api/activities/<int:activity_id>/refresh", methods=["POST"])
+def api_refresh_activity(activity_id):
+    """Refresh attività: refetch effort Strava + metadata e ricalcolo summary."""
+    row = get_cache()._conn.execute(
+        "SELECT strava_activity_id FROM activities WHERE activity_id=?", (activity_id,)
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "Attività non trovata"}), 404
+    strava_id = row["strava_activity_id"]
+    if not strava_id:
+        return jsonify({"error": "Attività non collegata a Strava"}), 400
+
+    from strava.client import StravaClient
+    from strava.efforts import fetch_and_store_strava_efforts
+
+    try:
+        strava = StravaClient(_config, get_cache())
+        saved = fetch_and_store_strava_efforts(strava, get_cache(), activity_id, int(strava_id))
+        try:
+            act_meta = _get_fresh_client().get_activity(int(strava_id))
+            _save_strava_meta(get_cache(), activity_id, act_meta)
+        except Exception as ex:
+            logger.warning(f"Meta Strava non disponibili durante refresh: {ex}")
+        logger.info(f"Refresh attività {activity_id} completato: {saved} effort Strava")
+        return jsonify({"ok": True, "saved": saved})
+    except Exception as e:
+        err = str(e)
+        if "429" in err or "Rate Limit" in err or "Too Many Requests" in err:
+            logger.warning("⏱ Refresh bloccato: rate limit Strava")
+            return jsonify({"error": "⏱ Rate limit Strava raggiunto"}), 429
+        logger.error(f"Refresh attività fallito (activity_id={activity_id}): {e}")
+        return jsonify({"error": err}), 500
+
+
 @app.route("/api/activities/<int:activity_id>/refresh-meta", methods=["POST"])
 def api_refresh_meta(activity_id):
     """Aggiorna i metadata biometrici da Strava per questa attività."""
@@ -406,7 +464,6 @@ def api_refresh_meta(activity_id):
         return jsonify({"error": "Nessun strava_activity_id associato"}), 400
     strava_id = row["strava_activity_id"]
     try:
-        strava = StravaClient(_config, get_cache())
         act_meta = _get_fresh_client().get_activity(int(strava_id))
         _save_strava_meta(get_cache(), activity_id, act_meta)
         return jsonify({"ok": True})
