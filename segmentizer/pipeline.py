@@ -15,6 +15,24 @@ from matcher.frechet import SegmentMatcher
 logger = logging.getLogger(__name__)
 
 
+def _idx_overlap_ratio(a_start, a_end, b_start, b_end):
+    try:
+        a0, a1 = int(a_start), int(a_end)
+        b0, b1 = int(b_start), int(b_end)
+    except Exception:
+        return 0.0
+    if a1 < a0:
+        a0, a1 = a1, a0
+    if b1 < b0:
+        b0, b1 = b1, b0
+    inter = min(a1, b1) - max(a0, b0)
+    if inter <= 0:
+        return 0.0
+    lena = max(1, a1 - a0)
+    lenb = max(1, b1 - b0)
+    return inter / float(min(lena, lenb))
+
+
 class Segmentizer:
 
     def __init__(self, config_path=None, config=None):
@@ -181,9 +199,41 @@ class Segmentizer:
                 logger.info(f"Match storico: {historical_saved}/{len(cached_segs)} segmenti in {filename}")
         except Exception as ex:
             logger.warning(f"Match storico fallito: {ex}")
-        # Salva segmenti e effort auto-rilevati
+        # Salva segmenti e effort auto-rilevati (solo non coperti da storici/Strava)
+        covered_ranges = []
+        for row in self.cache._conn.execute(
+            """SELECT start_idx, end_idx FROM efforts
+               WHERE activity_id=? AND source IN ('historical','strava_api')""",
+            (activity_id,)
+        ).fetchall():
+            covered_ranges.append((row["start_idx"], row["end_idx"]))
+
+        # Riduci frammentazione auto: evita duplicati stesso nome+tratto
+        compact_auto = []
+        for seg, result, act_epoch in sorted(
+            auto_efforts_data,
+            key=lambda x: float(getattr(x[1], "distance_m", 0.0) or 0.0),
+            reverse=True,
+        ):
+            seg_name = (seg.name or "").strip().lower()
+            is_dup = False
+            for s2, r2, _ in compact_auto:
+                if (s2.name or "").strip().lower() != seg_name:
+                    continue
+                if _idx_overlap_ratio(result.start_idx, result.end_idx, r2.start_idx, r2.end_idx) >= 0.60:
+                    is_dup = True
+                    break
+            if not is_dup:
+                compact_auto.append((seg, result, act_epoch))
+
         auto_saved = 0
-        for seg, result, act_epoch in auto_efforts_data:
+        for seg, result, act_epoch in compact_auto:
+            # Non salvare auto effort se coperto da storico/Strava
+            if any(
+                _idx_overlap_ratio(result.start_idx, result.end_idx, s0, s1) >= 0.75
+                for s0, s1 in covered_ranges
+            ):
+                continue
             import hashlib
             # ID negativo deterministico basato su coordinate (non collide con ID Strava positivi)
             seg_hash = int(hashlib.md5(
