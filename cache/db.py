@@ -300,6 +300,25 @@ class SegmentCache:
         )
         self._conn.commit()
 
+    def update_activity_totals(self, activity_id, total_distance_m=None, total_elevation_m=None):
+        """Aggiorna distanza/dislivello totale dell'attività."""
+        updates = []
+        values = []
+        if total_distance_m is not None:
+            updates.append("total_distance_m=?")
+            values.append(float(total_distance_m))
+        if total_elevation_m is not None:
+            updates.append("total_elevation_m=?")
+            values.append(float(total_elevation_m))
+        if not updates:
+            return
+        values.append(activity_id)
+        self._conn.execute(
+            f"UPDATE activities SET {', '.join(updates)} WHERE activity_id=?",
+            tuple(values)
+        )
+        self._conn.commit()
+
     # --- Settings ---
 
     def get_setting(self, key, default=None):

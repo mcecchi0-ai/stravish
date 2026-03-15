@@ -116,6 +116,73 @@ def _to_seconds(duration) -> int:
         return int(duration.total_seconds())
     return int(duration)  # stravalib Duration è già in secondi
 
+
+def _recompute_activity_totals_from_efforts(activity_id: int):
+    """Ricalcola distanza/dislivello attività usando gli effort e il tracciato GPX cache."""
+    import json
+    from utils.gpx_utils import haversine_m
+
+    cache = get_cache()
+    row = cache._conn.execute(
+        "SELECT gpx_points, stream_length FROM activities WHERE activity_id=?",
+        (activity_id,)
+    ).fetchone()
+    efforts = cache.get_efforts_for_activity(activity_id)
+
+    # Dislivello: somma effort (stimando da pendenza se necessario)
+    elev_sum = 0.0
+    for e in efforts:
+        elev = e.get("elev_gain_m") or 0.0
+        if elev <= 0 and (e.get("avg_grade_pct") and e.get("distance_m")):
+            elev = max(0.0, e["avg_grade_pct"] / 100.0 * e["distance_m"])
+        elev_sum += max(0.0, float(elev or 0.0))
+
+    # Distanza: coverage effort sulla traccia GPX (start_idx/end_idx)
+    covered_distance = 0.0
+    if row and row["gpx_points"]:
+        track = json.loads(row["gpx_points"])
+        if isinstance(track, list) and len(track) > 1:
+            t_len = len(track)
+            s_len = row["stream_length"] or t_len
+            cum = [0.0]
+            for i in range(1, t_len):
+                p0, p1 = track[i-1], track[i]
+                cum.append(cum[-1] + haversine_m(p0[0], p0[1], p1[0], p1[1]))
+
+            intervals = []
+            for e in efforts:
+                if e.get("start_idx") is None or e.get("end_idx") is None:
+                    continue
+                if s_len <= 1:
+                    continue
+                si = round(e["start_idx"] * (t_len - 1) / (s_len - 1))
+                ei = round(e["end_idx"]   * (t_len - 1) / (s_len - 1))
+                si = max(0, min(t_len - 1, si))
+                ei = max(0, min(t_len - 1, ei))
+                if ei > si:
+                    intervals.append((si, ei))
+
+            if intervals:
+                intervals.sort()
+                merged = [intervals[0]]
+                for si, ei in intervals[1:]:
+                    lsi, lei = merged[-1]
+                    if si <= lei:
+                        merged[-1] = (lsi, max(lei, ei))
+                    else:
+                        merged.append((si, ei))
+                covered_distance = sum(cum[ei] - cum[si] for si, ei in merged)
+
+    if covered_distance <= 0:
+        covered_distance = sum(max(0.0, float(e.get("distance_m") or 0.0)) for e in efforts)
+
+    cache.update_activity_totals(
+        activity_id,
+        total_distance_m=covered_distance,
+        total_elevation_m=elev_sum,
+    )
+
+
 app = Flask(__name__, static_folder=str(Path(__file__).parent), static_url_path="")
 
 _cache = None
