@@ -530,9 +530,7 @@ def api_refresh_activity(activity_id):
         return jsonify({"error": "Attività non trovata"}), 404
     strava_id = row["strava_activity_id"]
     if not strava_id:
-        _recompute_activity_totals_from_efforts(activity_id)
-        logger.info(f"Refresh locale attività {activity_id} completato (nessun link Strava)")
-        return jsonify({"ok": True, "saved": 0, "local_only": True})
+        return jsonify({"error": "Attività non collegata a Strava"}), 400
 
     from strava.client import StravaClient
     from strava.efforts import fetch_and_store_strava_efforts
@@ -545,9 +543,6 @@ def api_refresh_activity(activity_id):
             _save_strava_meta(get_cache(), activity_id, act_meta)
         except Exception as ex:
             logger.warning(f"Meta Strava non disponibili durante refresh: {ex}")
-
-        _recompute_activity_totals_from_efforts(activity_id)
-
         logger.info(f"Refresh attività {activity_id} completato: {saved} effort Strava")
         return jsonify({"ok": True, "saved": saved})
     except Exception as e:
