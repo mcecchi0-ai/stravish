@@ -999,7 +999,8 @@ async function showEffortsOnMap(efforts, activeSegId) {
     if (!e.polyline) return;
     try {
       const coords = decodePolyline(e.polyline).map(c=>[c[0],c[1]]);
-      const effortColor = e.source==='historical' ? '#40b4e0'
+      const effortColor = e.is_local_override    ? '#ff7a3c'  // locale che sovrascrive Strava
+                        : e.source==='historical' ? '#40b4e0'
                         : e.source==='auto'       ? '#6ab06a'
                         : '#fc4c02'; // strava_api
       const isDimmed = activeSegId && e.segment_id !== activeSegId;
