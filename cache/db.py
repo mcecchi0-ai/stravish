@@ -292,6 +292,23 @@ class SegmentCache:
         )
         self._conn.commit()
 
+    def update_activity_totals(self, activity_id, total_distance_m, total_elevation_m, num_points=None):
+        if num_points is None:
+            self._conn.execute(
+                """UPDATE activities
+                   SET total_distance_m=?, total_elevation_m=?
+                   WHERE activity_id=?""",
+                (total_distance_m, total_elevation_m, activity_id)
+            )
+        else:
+            self._conn.execute(
+                """UPDATE activities
+                   SET total_distance_m=?, total_elevation_m=?, num_points=?
+                   WHERE activity_id=?""",
+                (total_distance_m, total_elevation_m, num_points, activity_id)
+            )
+        self._conn.commit()
+
     def update_activity_gpx(self, activity_id, gpx_points_json: str, stream_length: int = None):
         """Salva il tracciato GPX come JSON array [[lat,lng],...] per visualizzazione."""
         self._conn.execute(
