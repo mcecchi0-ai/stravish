@@ -39,17 +39,21 @@ logger = logging.getLogger(__name__)
 
 # ── Log stream per SSE ────────────────────────────────────────────
 import queue as _queue
+from collections import deque as _deque
 logging.basicConfig(level=logging.INFO)
 _log_queue = _queue.Queue(maxsize=500)
+_log_history = _deque(maxlen=500)
 
 class _QueueHandler(logging.Handler):
     def emit(self, record):
         try:
-            _log_queue.put_nowait({
+            entry = {
                 "level": record.levelname,
                 "msg":   self.format(record),
                 "ts":    record.created,
-            })
+            }
+            _log_history.append(entry)
+            _log_queue.put_nowait(entry)
         except _queue.Full:
             pass
 
@@ -112,6 +116,213 @@ def _to_seconds(duration) -> int:
         return int(duration.total_seconds())
     return int(duration)  # stravalib Duration è già in secondi
 
+
+def _is_strict_local_equivalent(local_effort: dict, strava_effort: dict) -> bool:
+    """True solo se il segmento locale è praticamente identico al corrispettivo Strava."""
+    lsi, lei = local_effort.get("start_idx"), local_effort.get("end_idx")
+    ssi, sei = strava_effort.get("start_idx"), strava_effort.get("end_idx")
+    if None in (lsi, lei, ssi, sei) or lei <= lsi or sei <= ssi:
+        return False
+
+    ov = max(0, min(lei, sei) - max(lsi, ssi))
+    if ov <= 0:
+        return False
+
+    l_len = max(1, lei - lsi)
+    s_len = max(1, sei - ssi)
+    cov_l = ov / l_len
+    cov_s = ov / s_len
+    if cov_l < 0.95 or cov_s < 0.95:
+        return False
+
+    ld = float(local_effort.get("distance_m") or 0.0)
+    sd = float(strava_effort.get("distance_m") or 0.0)
+    if ld <= 0 or sd <= 0:
+        return False
+    dr = ld / sd
+    if dr < 0.97 or dr > 1.03:
+        return False
+
+    lt = float(local_effort.get("elapsed_seconds") or 0.0)
+    st = float(strava_effort.get("elapsed_seconds") or 0.0)
+    if lt > 0 and st > 0:
+        tr = lt / st
+        if tr < 0.97 or tr > 1.03:
+            return False
+
+    return True
+
+
+def _get_effective_efforts_for_activity(activity_id: int):
+    """Effort effettivi: Strava + locali solo se strettamente equivalenti (sostituiscono Strava)."""
+    cache = get_cache()
+    efforts = cache.get_efforts_for_activity(activity_id)
+    strava = [e for e in efforts if e.get("source") == "strava_api"]
+    local = [e for e in efforts if e.get("source") in {"auto", "historical", "frechet"}]
+
+    # Se non ci sono effort Strava, conserva i locali (caso attività solo locale).
+    if not strava:
+        return efforts
+
+    # Match locale↔strava solo se identici. Ogni Strava al massimo sostituito da un locale.
+    matched_strava_ids = set()
+    matched_local_ids = set()
+    for li, le in enumerate(local):
+        for si, se in enumerate(strava):
+            if si in matched_strava_ids:
+                continue
+            if _is_strict_local_equivalent(le, se):
+                matched_strava_ids.add(si)
+                matched_local_ids.add(li)
+                le["name"] = se.get("name") or le.get("name")
+                le["is_local_override"] = True
+                break
+
+    result = []
+    for si, se in enumerate(strava):
+        if si not in matched_strava_ids:
+            result.append(se)
+    for li, le in enumerate(local):
+        if li in matched_local_ids:
+            result.append(le)
+
+    # Mantieni anche eventuali effort non classificati.
+    other = [e for e in efforts if e.get("source") not in {"strava_api", "auto", "historical", "frechet"}]
+    result.extend(other)
+
+    result.sort(key=lambda e: (e.get("start_time_s") or 999999999, e.get("effort_id") or 0))
+    return result
+
+
+def _recompute_activity_totals_from_efforts(activity_id: int):
+    """Ricalcola distanza/dislivello attività usando gli effort e il tracciato GPX cache."""
+    import json
+    import statistics
+    from utils.gpx_utils import haversine_m
+
+    cache = get_cache()
+    row = cache._conn.execute(
+        "SELECT gpx_points, stream_length FROM activities WHERE activity_id=?",
+        (activity_id,)
+    ).fetchone()
+    efforts = _get_effective_efforts_for_activity(activity_id)
+
+    # Costruisci intervalli su indice stream (fonte comune anche senza GPX affidabile)
+    idx_intervals = []
+    m_per_idx_samples = []
+    for e in efforts:
+        si, ei = e.get("start_idx"), e.get("end_idx")
+        dist = float(e.get("distance_m") or 0.0)
+        if si is None or ei is None or ei <= si:
+            continue
+        idx_intervals.append((int(si), int(ei), e))
+        if dist > 0:
+            m_per_idx_samples.append(dist / (ei - si))
+
+    idx_intervals.sort(key=lambda x: (x[0], x[1]))
+    merged_idx = []
+    for si, ei, _ in idx_intervals:
+        if not merged_idx or si > merged_idx[-1][1]:
+            merged_idx.append([si, ei])
+        else:
+            merged_idx[-1][1] = max(merged_idx[-1][1], ei)
+    idx_covered = sum(ei - si for si, ei in merged_idx)
+    est_m_per_idx = statistics.median(m_per_idx_samples) if m_per_idx_samples else 0.0
+    est_distance_from_idx = idx_covered * est_m_per_idx if idx_covered > 0 else 0.0
+
+    # Distanza da GPX cache (se tracciato è valido)
+    covered_distance_gpx = 0.0
+    track_total_distance = 0.0
+    if row and row["gpx_points"]:
+        track = json.loads(row["gpx_points"])
+        if isinstance(track, list) and len(track) > 1:
+            t_len = len(track)
+            db_stream_len = row["stream_length"] or t_len
+            max_effort_end = max(
+                (int(e.get("end_idx")) for e in efforts if e.get("end_idx") is not None),
+                default=(db_stream_len - 1)
+            )
+            s_len = max(db_stream_len, max_effort_end + 1, t_len)
+
+            cum = [0.0]
+            for i in range(1, t_len):
+                p0, p1 = track[i-1], track[i]
+                cum.append(cum[-1] + haversine_m(p0[0], p0[1], p1[0], p1[1]))
+            track_total_distance = cum[-1]
+
+            intervals = []
+            for e in efforts:
+                if e.get("start_idx") is None or e.get("end_idx") is None:
+                    continue
+                if s_len <= 1:
+                    continue
+                si = round(e["start_idx"] * (t_len - 1) / (s_len - 1))
+                ei = round(e["end_idx"]   * (t_len - 1) / (s_len - 1))
+                si = max(0, min(t_len - 1, si))
+                ei = max(0, min(t_len - 1, ei))
+                if ei > si:
+                    intervals.append((si, ei))
+
+            if intervals:
+                intervals.sort()
+                merged = [list(intervals[0])]
+                for si, ei in intervals[1:]:
+                    lsi, lei = merged[-1]
+                    if si <= lei:
+                        merged[-1][1] = max(lei, ei)
+                    else:
+                        merged.append([si, ei])
+                covered_distance_gpx = sum(cum[ei] - cum[si] for si, ei in merged)
+
+    # Fallback robusto: se GPX è palesemente degradato (es. 0.4 km) usa scala da effort/indici.
+    if covered_distance_gpx <= 0:
+        covered_distance = est_distance_from_idx
+    elif track_total_distance < 1000 and est_distance_from_idx > covered_distance_gpx * 2.5:
+        covered_distance = est_distance_from_idx
+    elif est_distance_from_idx > 0 and covered_distance_gpx < est_distance_from_idx * 0.35:
+        covered_distance = est_distance_from_idx
+    else:
+        covered_distance = covered_distance_gpx
+
+    # Dislivello: evita doppio conteggio su segmenti sovrapposti (stesso intervallo coperto più volte).
+    elev_sum = 0.0
+    used = []
+    for si, ei, e in sorted(idx_intervals, key=lambda x: (x[0], x[1] - x[0]), reverse=False):
+        elev = float(e.get("elev_gain_m") or 0.0)
+        if elev <= 0 and (e.get("avg_grade_pct") and e.get("distance_m")):
+            elev = max(0.0, float(e["avg_grade_pct"]) / 100.0 * float(e["distance_m"]))
+        if elev <= 0:
+            continue
+
+        seg_len = max(1, ei - si)
+        uncovered = seg_len
+        for usi, uei in used:
+            ov = max(0, min(ei, uei) - max(si, usi))
+            uncovered -= ov
+        if uncovered <= 0:
+            continue
+
+        elev_sum += elev * (uncovered / seg_len)
+
+        # merge interval in used
+        used.append((si, ei))
+        used.sort()
+        merged_used = [used[0]]
+        for a, b in used[1:]:
+            la, lb = merged_used[-1]
+            if a <= lb:
+                merged_used[-1] = (la, max(lb, b))
+            else:
+                merged_used.append((a, b))
+        used = merged_used
+
+    cache.update_activity_totals(
+        activity_id,
+        total_distance_m=covered_distance,
+        total_elevation_m=elev_sum,
+    )
+
+
 app = Flask(__name__, static_folder=str(Path(__file__).parent), static_url_path="")
 
 _cache = None
@@ -156,39 +367,38 @@ def api_status():
 @app.route("/api/activities")
 def api_activities():
     activities = get_cache().get_all_activities()
-    c = get_cache()._conn
-    # Conta effort totali, Strava e auto separatamente
-    all_counts    = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts GROUP BY activity_id"
-    ).fetchall()}
-    strava_counts = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts WHERE source='strava_api' GROUP BY activity_id"
-    ).fetchall()}
-    auto_counts   = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts WHERE source='auto' GROUP BY activity_id"
-    ).fetchall()}
-    hist_counts   = {r[0]: r[1] for r in c.execute(
-        "SELECT activity_id, COUNT(*) FROM efforts WHERE source='historical' GROUP BY activity_id"
-    ).fetchall()}
+
+    # Conta effort effettivi esattamente come verranno mostrati nel treeview.
     for a in activities:
         aid = a["activity_id"]
-        a["effort_count"]           = all_counts.get(aid, 0)
-        a["strava_effort_count"]    = strava_counts.get(aid, 0)
-        a["auto_effort_count"]      = auto_counts.get(aid, 0)
-        a["historical_effort_count"]= hist_counts.get(aid, 0)
+        eff = _get_effective_efforts_for_activity(aid)
+        a["effort_count"] = len(eff)
+        a["strava_effort_count"] = sum(1 for e in eff if e.get("source") == "strava_api")
+        a["auto_effort_count"] = sum(1 for e in eff if e.get("source") == "auto")
+        a["historical_effort_count"] = sum(
+            1 for e in eff if e.get("source") in {"historical", "frechet"}
+        )
     return jsonify(activities)
 
 
 @app.route("/api/activities/<int:activity_id>/efforts")
 def api_activity_efforts(activity_id):
-    efforts = get_cache().get_efforts_for_activity(activity_id)
+    efforts = _get_effective_efforts_for_activity(activity_id)
     row = get_cache()._conn.execute(
         "SELECT num_points FROM activities WHERE activity_id=?", (activity_id,)
     ).fetchone()
     total_points = row["num_points"] if row else None
+
+    # Normalizza naming segmenti auto: rimuovi prefisso legacy "[auto]".
     for e in efforts:
         if total_points:
             e["total_points"] = total_points
+
+        if e.get("source") == "auto":
+            name = (e.get("name") or "").strip()
+            if name.lower().startswith("[auto]"):
+                e["name"] = name[6:].strip()
+
         _enrich_effort(e)
     return jsonify(efforts)
 
@@ -229,6 +439,13 @@ def api_logs_stream():
     """SSE endpoint — streamma i log in tempo reale."""
     def generate():
         yield "retry: 1000\n\n"
+        for entry in list(_log_history):
+            level = entry["level"]
+            msg   = entry["msg"].replace("\n", " ↵ ")
+            import datetime, json as _json
+            ts = datetime.datetime.fromtimestamp(entry["ts"]).strftime("%H:%M:%S")
+            data = _json.dumps({"level": level, "msg": msg, "ts": ts})
+            yield f"data: {data}\n\n"
         while True:
             try:
                 entry = _log_queue.get(timeout=15)
@@ -350,7 +567,7 @@ def api_activity_summary(activity_id):
 def api_activity_medals(activity_id):
     """Restituisce le medaglie (top-3 per segmento) per questa attività."""
     cache = get_cache()
-    efforts = cache.get_efforts_for_activity(activity_id)
+    efforts = _get_effective_efforts_for_activity(activity_id)
     medals = []
     for effort in efforts:
         seg_id = effort["segment_id"]
@@ -396,6 +613,45 @@ def api_activity_medals(activity_id):
     return jsonify(medals)
 
 
+@app.route("/api/activities/<int:activity_id>/refresh", methods=["POST"])
+def api_refresh_activity(activity_id):
+    """Refresh attività: refetch effort Strava + metadata e ricalcolo summary."""
+    row = get_cache()._conn.execute(
+        "SELECT strava_activity_id FROM activities WHERE activity_id=?", (activity_id,)
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "Attività non trovata"}), 404
+    strava_id = row["strava_activity_id"]
+    if not strava_id:
+        _recompute_activity_totals_from_efforts(activity_id)
+        logger.info(f"Refresh locale attività {activity_id} completato (nessun link Strava)")
+        return jsonify({"ok": True, "saved": 0, "local_only": True})
+
+    from strava.client import StravaClient
+    from strava.efforts import fetch_and_store_strava_efforts
+
+    try:
+        strava = StravaClient(_config, get_cache())
+        saved = fetch_and_store_strava_efforts(strava, get_cache(), activity_id, int(strava_id))
+        try:
+            act_meta = _get_fresh_client().get_activity(int(strava_id))
+            _save_strava_meta(get_cache(), activity_id, act_meta)
+        except Exception as ex:
+            logger.warning(f"Meta Strava non disponibili durante refresh: {ex}")
+
+        _recompute_activity_totals_from_efforts(activity_id)
+
+        logger.info(f"Refresh attività {activity_id} completato: {saved} effort Strava")
+        return jsonify({"ok": True, "saved": saved})
+    except Exception as e:
+        err = str(e)
+        if "429" in err or "Rate Limit" in err or "Too Many Requests" in err:
+            logger.warning("⏱ Refresh bloccato: rate limit Strava")
+            return jsonify({"error": "⏱ Rate limit Strava raggiunto"}), 429
+        logger.error(f"Refresh attività fallito (activity_id={activity_id}): {e}")
+        return jsonify({"error": err}), 500
+
+
 @app.route("/api/activities/<int:activity_id>/refresh-meta", methods=["POST"])
 def api_refresh_meta(activity_id):
     """Aggiorna i metadata biometrici da Strava per questa attività."""
@@ -406,7 +662,6 @@ def api_refresh_meta(activity_id):
         return jsonify({"error": "Nessun strava_activity_id associato"}), 400
     strava_id = row["strava_activity_id"]
     try:
-        strava = StravaClient(_config, get_cache())
         act_meta = _get_fresh_client().get_activity(int(strava_id))
         _save_strava_meta(get_cache(), activity_id, act_meta)
         return jsonify({"ok": True})
