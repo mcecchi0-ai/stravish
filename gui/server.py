@@ -265,7 +265,7 @@ def api_activities():
 
 @app.route("/api/activities/<int:activity_id>/efforts")
 def api_activity_efforts(activity_id):
-    efforts = get_cache().get_efforts_for_activity(activity_id)
+    efforts = _get_effective_efforts_for_activity(activity_id)
     row = get_cache()._conn.execute(
         "SELECT num_points FROM activities WHERE activity_id=?", (activity_id,)
     ).fetchone()
@@ -474,7 +474,7 @@ def api_activity_summary(activity_id):
 def api_activity_medals(activity_id):
     """Restituisce le medaglie (top-3 per segmento) per questa attività."""
     cache = get_cache()
-    efforts = cache.get_efforts_for_activity(activity_id)
+    efforts = _get_effective_efforts_for_activity(activity_id)
     medals = []
     for effort in efforts:
         seg_id = effort["segment_id"]
