@@ -114,6 +114,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   .act-delete{margin-left:6px;opacity:0;cursor:pointer;font-size:11px;transition:opacity .15s;user-select:none}
   .act-item:hover .act-delete{opacity:.5}
   .act-item:hover .act-delete:hover{opacity:1}
+.act-refresh{margin-left:6px;opacity:0;cursor:pointer;font-size:11px;transition:opacity .15s;user-select:none}
+.act-item:hover .act-refresh{opacity:.55}
+.act-item:hover .act-refresh:hover{opacity:1}
   .tree-seg-vam{font-size:10px;font-weight:600;color:var(--orange);background:rgba(252,76,2,.12);border-radius:3px;padding:1px 4px;margin-left:5px}
   #log-drawer{position:fixed;bottom:0;left:0;right:0;height:220px;background:var(--bg);border-top:1px solid var(--border);display:flex;flex-direction:column;transform:translateY(100%);transition:transform .2s ease;z-index:1500}
   #log-drawer.open{transform:translateY(0)}
@@ -458,6 +461,10 @@ function addLog(ts, level, msg) {
   if (level === 'WARNING' || level === 'ERROR' || isActive) {
     logPanel().classList.add('open');
     document.getElementById('log-badge').style.display = 'none';
+  } else if (!logPanel().classList.contains('open')) {
+    const badge = document.getElementById('log-badge');
+    badge.style.display = 'block';
+    badge.textContent = `📋 ${msg.slice(0,28)}`;
   }
 }
 
@@ -490,8 +497,7 @@ document.getElementById('log-close').addEventListener('click', () => {
   const rows = logBody().children;
   if (rows.length) {
     const last = rows[rows.length-1].querySelector('.log-msg');
-    document.getElementById('log-badge-text').textContent =
-      (last?.textContent || '').slice(0,40);
+    badge.textContent = `📋 ${(last?.textContent || '').slice(0,40)}`;
   }
 });
 document.getElementById('log-badge').addEventListener('click', () => {
@@ -634,6 +640,7 @@ function renderActivities() {
         ${a.effort_count>0 ? `<span class="act-expand ${a.activity_id===currentActivityId?'open':''}" data-expand="${a.activity_id}">▶</span>` : ''}
       </div>
       <div class="act-meta">${date} · ${dist} km · +${ele} m
+        <span class="act-refresh" data-id="${a.activity_id}" title="Refresh attività">🔄</span>
         <span class="act-delete" data-id="${a.activity_id}" title="Elimina attività">🗑</span>
       </div>
       ${segBadge}
@@ -970,7 +977,8 @@ async function showEffortsOnMap(efforts, activeSegId) {
     if (!e.polyline) return;
     try {
       const coords = decodePolyline(e.polyline).map(c=>[c[0],c[1]]);
-      const effortColor = e.source==='historical' ? '#40b4e0'
+      const effortColor = e.is_local_override    ? '#ff7a3c'  // locale che sovrascrive Strava
+                        : e.source==='historical' ? '#40b4e0'
                         : e.source==='auto'       ? '#6ab06a'
                         : '#fc4c02'; // strava_api
       const isDimmed = activeSegId && e.segment_id !== activeSegId;
@@ -1183,6 +1191,36 @@ document.getElementById('act-list').addEventListener('click', async e => {
     showEffortsOnMap(currentEfforts);
   }
   await Promise.all([loadStatus(), loadActivities()]);
+}, true);
+
+// .act-refresh → refresh attività (ri-fetch Strava + summary)
+document.getElementById('act-list').addEventListener('click', async e => {
+  const btn = e.target.closest('.act-refresh');
+  if (!btn) return;
+  e.stopPropagation();
+  const id = +btn.dataset.id;
+  const statusEl = document.getElementById('fs-' + id);
+  btn.style.pointerEvents = 'none';
+  btn.style.opacity = '.35';
+  if (statusEl) statusEl.innerHTML = '<span>⟳ Refresh attività…</span>';
+  try {
+    const data = await api(`/api/activities/${id}/refresh`, {method:'POST'});
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">✓ Refresh completato (${data.saved||0} effort)</span>`;
+    await Promise.all([loadStatus(), loadActivities()]);
+    if (currentActivityId === id) {
+      const efforts = await api(`/api/activities/${id}/efforts`);
+      currentEfforts = efforts;
+      populateTree(id, efforts);
+      clearMapLayers();
+      showEffortsOnMap(efforts);
+      await showActivitySummary(id);
+    }
+  } catch(err) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">⚠ ${err.message}</span>`;
+  } finally {
+    btn.style.pointerEvents = '';
+    btn.style.opacity = '';
+  }
 }, true);
 
 // .act-delete → elimina attività (listener globale su act-list)
