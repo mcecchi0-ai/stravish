@@ -437,7 +437,26 @@ class SegmentCache:
                  e.effort_id ASC""",
             (activity_id,)
         ).fetchall()
-        return [dict(r) for r in rows]
+
+        # Priorità sorgenti per stesso segmento nella stessa attività:
+        # locale (historical/auto/frechet) > strava_api.
+        raw = [dict(r) for r in rows]
+        local_sources = {"historical", "auto", "frechet"}
+        has_local_for_segment = {
+            r["segment_id"]
+            for r in raw
+            if (r.get("source") in local_sources)
+        }
+
+        filtered = []
+        for r in raw:
+            if r.get("source") == "strava_api" and r["segment_id"] in has_local_for_segment:
+                continue
+            r["is_local_override"] = (
+                r.get("source") in local_sources and r["segment_id"] in has_local_for_segment
+            )
+            filtered.append(r)
+        return filtered
 
     @staticmethod
     def _row_to_segment(row):
