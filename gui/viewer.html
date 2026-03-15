@@ -58,6 +58,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .map-toggle{background:var(--surface);border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;transition:all .15s;user-select:none}
 .map-toggle:hover{background:var(--surface2);color:var(--text)}
 .map-toggle.active{background:var(--orange);color:white;border-color:var(--orange)}
+#map-legend{position:absolute;top:44px;right:10px;z-index:500;min-width:230px;background:rgba(26,29,39,.95);border:1px solid var(--border);border-radius:8px;padding:8px 10px;display:none}
+#map-legend.open{display:block}
+.legend-row{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text2);padding:3px 0}
+.legend-swatch{width:14px;height:3px;border-radius:2px;display:inline-block}
 
   /* STRAVA ACTIVITY ID DIALOG (post-import manuale) */
   #strava-link-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:3000;align-items:center;justify-content:center}
@@ -89,6 +93,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .tree-seg-num{font-size:10px;color:var(--text2);width:16px;flex-shrink:0;text-align:right;margin-top:1px}
 .tree-seg-body{flex:1;min-width:0}
 .tree-seg-name{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tree-src-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle}
 .tree-seg-meta{font-size:10px;color:var(--text2);margin-top:1px}
 .tree-seg-time{font-size:11px;font-weight:700;color:var(--orange);white-space:nowrap;flex-shrink:0}
   #log-panel{position:fixed;bottom:0;left:0;right:0;height:0;background:var(--bg);border-top:1px solid var(--border);transition:height .2s ease;overflow:hidden;z-index:1000;display:flex;flex-direction:column}
@@ -261,6 +266,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <div id="map-controls">
         <div class="map-toggle active" id="toggle-pan">🔒 Pan</div>
         <div class="map-toggle" id="toggle-fit">⊞ Fit</div>
+        <div class="map-toggle" id="toggle-legend">☰ Legenda</div>
+      </div>
+      <div id="map-legend">
+        <div class="legend-row"><span class="legend-swatch" style="background:#fc4c02"></span>Arancione: Strava effort</div>
+        <div class="legend-row"><span class="legend-swatch" style="background:#40b4e0"></span>Cyan: effort Strava reperito dal DB</div>
+        <div class="legend-row"><span class="legend-swatch" style="background:#6ab06a"></span>Verde: effort locale/auto</div>
+        <div class="legend-row"><span class="legend-swatch" style="background:#f5c400"></span>Giallo: tratta non riconosciuta dal GPX</div>
       </div>
       <div id="import-overlay">
         <div id="drop-zone">
@@ -398,6 +410,12 @@ document.getElementById('toggle-fit').addEventListener('click', () => {
   panMode = false;
   document.getElementById('toggle-pan').classList.remove('active');
   document.getElementById('toggle-fit').classList.add('active');
+});
+
+document.getElementById('toggle-legend').addEventListener('click', () => {
+  const l = document.getElementById('map-legend');
+  l.classList.toggle('open');
+  document.getElementById('toggle-legend').classList.toggle('active', l.classList.contains('open'));
 });
 
 function clearMapLayers() {
@@ -898,10 +916,13 @@ function populateTree(actId, efforts) {
     const grade = e.avg_grade_pct
       ? (e.avg_grade_pct>0?'+':'')+e.avg_grade_pct.toFixed(1)+'%' : '';
     const vamTag = '';
+    const srcColor = e.source==='historical' ? '#40b4e0'
+                  : e.source==='auto'       ? '#6ab06a'
+                  : '#fc4c02';
     return `<div class="tree-seg ${e.segment_id===activeSegmentId?'active':''}" data-id="${e.segment_id}">
       <div class="tree-seg-num">${i+1}</div>
       <div class="tree-seg-body">
-        <div class="tree-seg-name">${e.name}</div>
+        <div class="tree-seg-name"><span class="tree-src-dot" style="background:${srcColor}"></span>${e.name}</div>
         <div class="tree-seg-meta">${dist}${grade?' · '+grade:''}${vamTag}</div>
       </div>
       <div class="tree-seg-time">${formatTime(e.elapsed_seconds)}</div>
@@ -973,6 +994,7 @@ async function showEffortsOnMap(efforts, activeSegId) {
   }
 
   // 3. Segmenti Strava in arancio sopra
+  const effortLayers = [];
   efforts.forEach(e => {
     if (!e.polyline) return;
     try {
@@ -986,16 +1008,14 @@ async function showEffortsOnMap(efforts, activeSegId) {
         .addTo(map).bindTooltip(e.name, {sticky:true});
       layer.on('click', () => selectSegment(e.segment_id));
       mapLayers.push(layer);
+      effortLayers.push(layer);
     } catch(ex){}
   });
 
-  if (efforts.length) {
-    const segLayers = mapLayers.filter(l => l.options && l.options.color === '#fc4c02');
-    if (segLayers.length) {
-      const group = L.featureGroup(segLayers);
-      if (panMode) map.panTo(group.getBounds().getCenter());
-      else map.fitBounds(group.getBounds(), {padding:[30,30]});
-    }
+  if (effortLayers.length) {
+    const group = L.featureGroup(effortLayers);
+    if (panMode) map.panTo(group.getBounds().getCenter());
+    else map.fitBounds(group.getBounds(), {padding:[30,30]});
   }
 }
 

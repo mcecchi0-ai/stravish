@@ -270,9 +270,42 @@ def api_activity_efforts(activity_id):
         "SELECT num_points FROM activities WHERE activity_id=?", (activity_id,)
     ).fetchone()
     total_points = row["num_points"] if row else None
+
+    # Normalizza naming segmenti auto: se trovano equivalente Strava in attività,
+    # usa il nome Strava; in ogni caso rimuovi prefisso legacy "[auto]".
+    strava_like = [
+        e for e in efforts
+        if e.get("source") in {"strava_api", "historical", "frechet"}
+    ]
     for e in efforts:
         if total_points:
             e["total_points"] = total_points
+
+        if e.get("source") == "auto":
+            name = (e.get("name") or "").strip()
+            if name.lower().startswith("[auto]"):
+                e["name"] = name[6:].strip()
+
+            best = None
+            best_ov = 0.0
+            asi, aei = e.get("start_idx"), e.get("end_idx")
+            if asi is not None and aei is not None and aei > asi:
+                a_len = max(1, aei - asi)
+                for se in strava_like:
+                    ssi, sei = se.get("start_idx"), se.get("end_idx")
+                    if ssi is None or sei is None or sei <= ssi:
+                        continue
+                    overlap = max(0, min(aei, sei) - max(asi, ssi))
+                    if overlap <= 0:
+                        continue
+                    ov_ratio = overlap / a_len
+                    if ov_ratio > best_ov:
+                        best_ov = ov_ratio
+                        best = se
+            if best and best_ov >= 0.35:
+                e["name"] = best.get("name") or e.get("name")
+                e["auto_equivalent_strava"] = True
+
         _enrich_effort(e)
     return jsonify(efforts)
 
