@@ -108,6 +108,12 @@ def _enrich_effort(e):
         e["vam"] = None
 
 
+# Safety net per merge parziali: se la selezione "effective efforts" viene persa,
+# il server continua a funzionare usando gli effort raw.
+def _get_effective_efforts_for_activity(activity_id: int):
+    return get_cache().get_efforts_for_activity(activity_id)
+
+
 def _to_seconds(duration) -> int:
     """Converte stravalib Duration o timedelta in secondi interi."""
     if duration is None:
