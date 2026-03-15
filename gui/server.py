@@ -12,6 +12,7 @@ Endpoints:
 
 import sys
 import os
+import re
 import logging
 import threading
 import webbrowser
@@ -194,6 +195,23 @@ def _to_seconds(duration) -> int:
     if hasattr(duration, 'total_seconds'):
         return int(duration.total_seconds())
     return int(duration)  # stravalib Duration è già in secondi
+
+
+def _persist_gpx_payload(filename_hint: str, payload: bytes) -> str:
+    """Salva un GPX in cache/imported_gpx e ritorna path persistente."""
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", filename_hint or "activity")
+    if not safe.lower().endswith(".gpx"):
+        safe += ".gpx"
+    root = Path(_config.get("cache", {}).get("db_path", "./cache/segments.db")).parent
+    out_dir = root / "imported_gpx"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / safe
+    idx = 1
+    while target.exists():
+        target = out_dir / f"{Path(safe).stem}_{idx}.gpx"
+        idx += 1
+    target.write_bytes(payload)
+    return str(target)
 
 app = Flask(__name__, static_folder=str(Path(__file__).parent), static_url_path="")
 
@@ -481,6 +499,66 @@ def api_refresh_meta(activity_id):
         _save_strava_meta(get_cache(), activity_id, act_meta)
         return jsonify({"ok": True})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/activities/<int:activity_id>/refresh", methods=["POST"])
+def api_refresh_activity(activity_id):
+    """Ricalcola aggregati/segmentizzazione da GPX locale, poi aggiorna Strava."""
+    from segmentizer.pipeline import Segmentizer
+    from strava.client import StravaClient
+    from strava.efforts import fetch_and_store_strava_efforts
+
+    data = request.get_json(silent=True) or {}
+    activity_type = data.get("activity_type", "cycling")
+
+    row = get_cache()._conn.execute(
+        """SELECT activity_id, filename, strava_activity_id, gpx_path
+           FROM activities WHERE activity_id=?""",
+        (activity_id,)
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "Attività non trovata"}), 404
+
+    gpx_path = row["gpx_path"]
+    if not gpx_path or not Path(gpx_path).exists():
+        return jsonify({
+            "error": "GPX sorgente non disponibile per refresh. Reimporta l'attività da file o Strava."
+        }), 400
+
+    # Reset effort esistenti per ricalcolo pulito
+    get_cache().delete_efforts_for_activity(activity_id)
+
+    try:
+        seg = Segmentizer(config=_config)
+        r = seg.process(
+            gpx_path,
+            activity_type=activity_type,
+            filename_override=row["filename"],
+            strava_activity_id=row["strava_activity_id"],
+        )
+
+        strava_saved = 0
+        if row["strava_activity_id"]:
+            strava = StravaClient(_config, get_cache())
+            strava_saved = fetch_and_store_strava_efforts(
+                strava, get_cache(), activity_id, int(row["strava_activity_id"])
+            )
+            try:
+                act_meta = _get_fresh_client().get_activity(int(row["strava_activity_id"]))
+                _save_strava_meta(get_cache(), activity_id, act_meta)
+            except Exception as ex:
+                logger.warning(f"refresh meta Strava fallito: {ex}")
+
+        return jsonify({
+            "ok": True,
+            "activity_id": activity_id,
+            "segments_matched": len(r.get("segments_matched", [])),
+            "strava_efforts": strava_saved,
+            "gpx_stats": r.get("gpx_stats", {}),
+        })
+    except Exception as e:
+        logger.error("api_refresh_activity error: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -837,13 +915,11 @@ def api_import():
 
     seg = Segmentizer(config=_config)
 
-    import tempfile
     for f in files:
-        with tempfile.NamedTemporaryFile(suffix=".gpx", delete=False) as tmp:
-            f.save(tmp.name)
-            tmp_path = tmp.name
         try:
-            r = seg.process(tmp_path, activity_type=request.form.get("type", "cycling"))
+            payload = f.read()
+            src_path = _persist_gpx_payload(f.filename or "upload.gpx", payload)
+            r = seg.process(src_path, activity_type=request.form.get("type", "cycling"))
             matched = r["segments_matched"]
             result = {
                 "filename": f.filename,
@@ -870,8 +946,6 @@ def api_import():
             results.append(result)
         except Exception as e:
             results.append({"filename": f.filename, "error": str(e)})
-        finally:
-            os.unlink(tmp_path)
 
     return jsonify(results)
 
@@ -885,7 +959,7 @@ def api_strava_import_activity():
     2. Importa GPX via pipeline (fetch segmenti + matching Fréchet)
     3. Fetcha effort da API Strava (i 68 esatti)
     """
-    import traceback, tempfile, os as _os
+    import traceback
     from strava.auth import StravaAuth as _Auth
     from stravalib.client import Client
     from stravalib.util.limiter import DefaultRateLimiter
@@ -925,18 +999,11 @@ def api_strava_import_activity():
         safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in act_name)
         filename  = f"strava_{strava_activity_id}_{safe_name[:40]}.gpx"
 
-        with tempfile.NamedTemporaryFile(suffix=".gpx", delete=False,
-                                          mode="w", encoding="utf-8") as tmp:
-            tmp.write(gpx_content)
-            tmp_path = tmp.name
-
-        try:
-            seg = Segmentizer(config=_config)
-            r = seg.process(tmp_path, activity_type=activity_type,
-                            filename_override=filename,
-                            strava_activity_id=strava_activity_id)
-        finally:
-            _os.unlink(tmp_path)
+        src_path = _persist_gpx_payload(filename, gpx_content.encode("utf-8"))
+        seg = Segmentizer(config=_config)
+        r = seg.process(src_path, activity_type=activity_type,
+                        filename_override=filename,
+                        strava_activity_id=strava_activity_id)
 
         activity_id = r["activity_id"]
 

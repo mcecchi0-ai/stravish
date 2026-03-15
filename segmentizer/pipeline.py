@@ -138,6 +138,7 @@ class Segmentizer:
         is_reimport = activity_id is not None
         if is_reimport:
             logger.info("Attività già presente (id={}), aggiorno tracciato".format(activity_id))
+            self.cache.update_activity_totals(activity_id, total_dist, total_ele, len(points))
             self.cache.update_activity_gpx(activity_id, gpx_points_json, len(points))
         else:
             activity_id = self.cache.insert_activity(
@@ -145,8 +146,9 @@ class Segmentizer:
                 strava_activity_id=strava_activity_id,
             )
             self.cache.update_activity_gpx(activity_id, gpx_points_json, len(points))
-        if gpx_meta:
-            self.cache.update_activity_meta(activity_id, **gpx_meta)
+        gpx_meta = dict(gpx_meta or {})
+        gpx_meta["gpx_path"] = str(gpx_path)
+        self.cache.update_activity_meta(activity_id, **gpx_meta)
 
 
         # ── Match segmenti storici già in cache ──────────────────────
