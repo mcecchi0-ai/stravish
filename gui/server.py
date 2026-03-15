@@ -197,103 +197,6 @@ def _to_seconds(duration) -> int:
     return int(duration)  # stravalib Duration è già in secondi
 
 
-
-
-def _interval_uncovered_fraction(start_idx, end_idx, covered):
-    try:
-        a = int(start_idx)
-        b = int(end_idx)
-    except Exception:
-        return 1.0
-    if b < a:
-        a, b = b, a
-    total = max(1, b - a)
-
-    overlap = 0
-    for c0, c1 in covered:
-        if c1 <= a or c0 >= b:
-            continue
-        overlap += max(0, min(b, c1) - max(a, c0))
-    overlap = min(overlap, total)
-    return max(0.0, min(1.0, 1.0 - (overlap / float(total))))
-
-
-def _merge_interval(covered, start_idx, end_idx):
-    try:
-        a = int(start_idx)
-        b = int(end_idx)
-    except Exception:
-        return
-    if b < a:
-        a, b = b, a
-    if a == b:
-        b = a + 1
-
-    out = []
-    inserted = False
-    for c0, c1 in covered:
-        if c1 < a:
-            out.append((c0, c1))
-        elif b < c0:
-            if not inserted:
-                out.append((a, b))
-                inserted = True
-            out.append((c0, c1))
-        else:
-            a = min(a, c0)
-            b = max(b, c1)
-    if not inserted:
-        out.append((a, b))
-    covered[:] = out
-
-
-def _recompute_activity_summary_from_efforts(activity_id):
-    """Ricalcola summary da effort presenti nel DB (senza GPX/Strava)."""
-    efforts = _get_effective_efforts_for_activity(activity_id)
-    if not efforts:
-        get_cache().update_activity_totals(activity_id, 0.0, 0.0)
-        return {"total_distance_m": 0.0, "total_elevation_m": 0.0, "moving_time_s": 0}
-
-    ordered = sorted(
-        efforts,
-        key=lambda e: (
-            -_source_rank(e.get("source")),
-            -(float(e.get("distance_m") or 0.0)),
-            int(e.get("start_idx") or 0),
-        )
-    )
-
-    covered = []
-    total_dist = 0.0
-    total_elev = 0.0
-    total_time = 0.0
-
-    for e in ordered:
-        frac = _interval_uncovered_fraction(e.get("start_idx"), e.get("end_idx"), covered)
-        if frac <= 0:
-            continue
-
-        dist = float(e.get("distance_m") or 0.0) * frac
-        secs = float(e.get("elapsed_seconds") or 0.0) * frac
-        elev = float(e.get("elev_gain_m") or 0.0) * frac
-        if elev <= 0:
-            grade = float(e.get("avg_grade_pct") or 0.0)
-            elev = max(0.0, (grade / 100.0) * dist)
-
-        total_dist += dist
-        total_time += secs
-        total_elev += elev
-        _merge_interval(covered, e.get("start_idx"), e.get("end_idx"))
-
-    get_cache().update_activity_totals(activity_id, total_dist, total_elev)
-    if total_time > 0:
-        get_cache().update_activity_meta(activity_id, moving_time_s=int(round(total_time)))
-
-    return {
-        "total_distance_m": total_dist,
-        "total_elevation_m": total_elev,
-        "moving_time_s": int(round(total_time)),
-    }
 def _persist_gpx_payload(filename_hint: str, payload: bytes) -> str:
     """Salva un GPX in cache/imported_gpx e ritorna path persistente."""
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", filename_hint or "activity")
@@ -619,15 +522,9 @@ def api_refresh_activity(activity_id):
 
     gpx_path = row["gpx_path"]
     if not gpx_path or not Path(gpx_path).exists():
-        stats = _recompute_activity_summary_from_efforts(activity_id)
         return jsonify({
-            "ok": True,
-            "activity_id": activity_id,
-            "mode": "efforts_only",
-            "warning": "GPX sorgente non disponibile: summary ricalcolato dagli effort presenti nel DB.",
-            "gpx_stats": stats,
-            "strava_efforts": 0,
-        })
+            "error": "GPX sorgente non disponibile per refresh. Reimporta l'attività da file o Strava."
+        }), 400
 
     # Reset effort esistenti per ricalcolo pulito
     get_cache().delete_efforts_for_activity(activity_id)
