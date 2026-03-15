@@ -256,10 +256,13 @@ def api_activities():
             hist_counts[aid] = hist_counts.get(aid, 0) + 1
     for a in activities:
         aid = a["activity_id"]
-        a["effort_count"]           = all_counts.get(aid, 0)
-        a["strava_effort_count"]    = strava_counts.get(aid, 0)
-        a["auto_effort_count"]      = auto_counts.get(aid, 0)
-        a["historical_effort_count"]= hist_counts.get(aid, 0)
+        eff = _get_effective_efforts_for_activity(aid)
+        a["effort_count"] = len(eff)
+        a["strava_effort_count"] = sum(1 for e in eff if e.get("source") == "strava_api")
+        a["auto_effort_count"] = sum(1 for e in eff if e.get("source") == "auto")
+        a["historical_effort_count"] = sum(
+            1 for e in eff if e.get("source") in {"historical", "frechet"}
+        )
     return jsonify(activities)
 
 
