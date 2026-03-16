@@ -100,7 +100,7 @@ python -m cli auth logout      # Rimuovi token salvato
 
 ### Analisi GPX
 ```bash
-# Analisi base (ciclismo)
+# Analisi base
 python -m cli run uscita.gpx
 
 # Specificare tipo attività
@@ -118,6 +118,9 @@ python -m cli run uscita.gpx -v
 python -m cli cache stats      # Quanti segmenti in cache, dimensione DB
 python -m cli cache clear      # Svuota la cache (chiede conferma)
 ```
+
+### GUI
+python run.py serve
 
 ### Output esempio
 ```
