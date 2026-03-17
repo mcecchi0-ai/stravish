@@ -170,7 +170,7 @@ import sys
 sys.stderr = StderrToLogger(logging.getLogger("STDERR"), logging.ERROR)
 
 
-def _fetch_activity(client, activity_id: int, include_all_efforts: bool = False, context: str = ""):
+def _fetch_activity(client, activity_id: int, include_all_efforts: bool = True, context: str = ""):
     ctx = f" ({context})" if context else ""
     logger.info(
         "Strava get_activity(%s, include_all_efforts=%s)%s",

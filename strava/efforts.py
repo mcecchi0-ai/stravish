@@ -68,7 +68,7 @@ def fetch_and_store_strava_efforts(strava_client, cache: SegmentCache,
         logger.info(se)
         hidden = getattr(se, 'hidden', False)
         if hidden:
-            logger.info(f"Segmento {seg_id} '{getattr(seg,'name','?')}' nascosto — scartato")
+            logger.info(f"Segmento {getattr(se,'id','?')} '{getattr(se,'name','?')}' nascosto — scartato")
             skipped += 1
             continue
 
