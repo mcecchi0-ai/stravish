@@ -54,6 +54,7 @@ class Effort:
     strava_effort_id: Optional[int] = None
     source: str = "frechet"
     start_time_s: Optional[float] = None   # epoch UTC — ordinamento stabile
+    average_heartrate: Optional[float] = None
 
 
 class SegmentCache:
@@ -112,7 +113,8 @@ class SegmentCache:
         elev_gain_m        REAL,
         frechet_distance_m REAL,
         start_idx          INTEGER,
-        end_idx            INTEGER
+        end_idx            INTEGER,
+        average_heartrate  REAL
     );
 
     CREATE INDEX IF NOT EXISTS idx_segments_bbox  ON segments (start_lat, start_lng);
@@ -129,6 +131,7 @@ class SegmentCache:
         ("efforts",    "strava_effort_id",      "INTEGER UNIQUE DEFAULT NULL"),
         ("efforts",    "source",                "TEXT DEFAULT 'frechet'"),
         ("efforts",    "start_time_s",          "REAL DEFAULT NULL"),
+        ("efforts",    "average_heartrate",    "REAL DEFAULT NULL"),
         ("activities", "gpx_points",             "TEXT DEFAULT NULL"),
         ("activities", "stream_length",           "INTEGER DEFAULT NULL"),
         ("activities", "moving_time_s",           "INTEGER DEFAULT NULL"),
@@ -380,19 +383,20 @@ class SegmentCache:
                    (activity_id, segment_id, strava_effort_id, source,
                     elapsed_seconds, avg_speed_ms, avg_grade_pct,
                     distance_m, elev_gain_m, frechet_distance_m,
-                    start_idx, end_idx, start_time_s)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    start_idx, end_idx, start_time_s, average_heartrate)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(strava_effort_id) DO UPDATE SET
                      elapsed_seconds=excluded.elapsed_seconds,
                      avg_speed_ms=excluded.avg_speed_ms,
                      start_idx=excluded.start_idx,
-                     start_time_s=excluded.start_time_s""",
+                     start_time_s=excluded.start_time_s,
+                     average_heartrate=excluded.average_heartrate""",
                 (effort.activity_id, effort.segment_id,
                  effort.strava_effort_id,
                  getattr(effort, "source", "frechet"),
                  effort.elapsed_seconds, effort.avg_speed_ms, effort.avg_grade_pct,
                  effort.distance_m, effort.elev_gain_m, effort.frechet_distance_m,
-                 effort.start_idx, effort.end_idx, start_time_s)
+                 effort.start_idx, effort.end_idx, start_time_s, getattr(effort, 'average_heartrate', None))
             )
         else:
             cur = self._conn.execute(
@@ -400,13 +404,13 @@ class SegmentCache:
                    (activity_id, segment_id, source,
                     elapsed_seconds, avg_speed_ms, avg_grade_pct,
                     distance_m, elev_gain_m, frechet_distance_m,
-                    start_idx, end_idx, start_time_s)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    start_idx, end_idx, start_time_s, average_heartrate)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (effort.activity_id, effort.segment_id,
                  getattr(effort, "source", "frechet"),
                  effort.elapsed_seconds, effort.avg_speed_ms, effort.avg_grade_pct,
                  effort.distance_m, effort.elev_gain_m, effort.frechet_distance_m,
-                 effort.start_idx, effort.end_idx, start_time_s)
+                 effort.start_idx, effort.end_idx, start_time_s, getattr(effort, 'average_heartrate', None))
             )
         self._conn.commit()
         return cur.lastrowid

@@ -1094,13 +1094,16 @@ function renderSegmentHistory(seg, efforts) {
   <div class="efforts-section">
     <div class="section-title">Storico (${efforts.length} effort)</div>
     <table class="efforts-table">
-      <thead><tr><th>#</th><th>Data</th><th>Tempo</th><th>km/h</th><th>VAM</th><th>Δ best</th></tr></thead>
+      <thead><tr><th>#</th><th>Data</th><th>Tempo</th><th>km/h</th><th>bpm</th><th>VAM</th><th>Δ best</th></tr></thead>
       <tbody>${efforts.map(e => {
         const rc = e.rank<=3 ? `rank-${e.rank}` : 'rank-n';
         const delta = e.rank===1
           ? '<span class="delta-best is-best">🏆</span>'
           : `<span class="delta-best">+${formatTime(e.delta_from_best)}</span>`;
         const date = e.activity_date ? e.activity_date.slice(0,10) : '—';
+        const hrTd = (e.average_heartrate != null)
+          ? `<td>${Math.round(e.average_heartrate)}</td>`
+          : '<td style="color:var(--text2)">—</td>';
         const vamTd = e.vam ? `<td style="color:var(--orange);font-size:11px">▲${e.vam}</td>` : '<td style="color:var(--text2)">—</td>';
         const isCurrent = e.activity_id === currentActivityId;
         return `<tr class="${isCurrent?'cur-act-row':''}" data-aid="${e.activity_id}">
@@ -1108,6 +1111,7 @@ function renderSegmentHistory(seg, efforts) {
           <td style="font-size:11px;color:var(--text2)">${date}</td>
           <td style="font-weight:600">${formatTime(e.elapsed_seconds)}</td>
           <td>${(e.avg_speed_kmh||0).toFixed(1)}</td>
+          ${hrTd}
           ${vamTd}
           <td>${delta}</td>
         </tr>`;

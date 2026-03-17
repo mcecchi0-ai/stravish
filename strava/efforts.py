@@ -67,7 +67,6 @@ def fetch_and_store_strava_efforts(strava_client, cache: SegmentCache,
     for se in raw_efforts:
         logger.info(se)
         hidden = getattr(se, 'hidden', False)
-        #TODO inserisci average_heartrate tra le info effort nella tabella di dettaglio
         if hidden:
             logger.info(f"Segmento {seg_id} '{getattr(seg,'name','?')}' nascosto — scartato")
             skipped += 1
@@ -152,6 +151,12 @@ def fetch_and_store_strava_efforts(strava_client, cache: SegmentCache,
         gps_start_idx = getattr(se, 'start_index', None)
         gps_end_idx   = getattr(se, 'end_index', None)
 
+        avg_hr = getattr(se, "average_heartrate", None)
+        try:
+            avg_hr = float(avg_hr) if avg_hr is not None else None
+        except Exception:
+            avg_hr = None
+
         effort = Effort(
             effort_id=None,
             activity_id=activity_id,
@@ -167,6 +172,7 @@ def fetch_and_store_strava_efforts(strava_client, cache: SegmentCache,
             start_idx=gps_start_idx,
             end_idx=gps_end_idx,
             start_time_s=start_time_s,
+            average_heartrate=avg_hr,
         )
         cache.insert_effort(effort)
         saved += 1
