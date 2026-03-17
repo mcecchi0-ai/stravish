@@ -49,7 +49,11 @@ def build_gpx_from_streams(client, strava_activity_id: int, activity_name: str =
     # Recupera start_date per i timestamp assoluti
     start_dt = None
     try:
-        activity = client.get_activity(strava_activity_id)
+        logger.info(
+            "Strava get_activity(%s, include_all_efforts=False) (gpx_builder.start_date)",
+            int(strava_activity_id),
+        )
+        activity = client.get_activity(int(strava_activity_id), include_all_efforts=False)
         start_dt = activity.start_date
         if not isinstance(start_dt, datetime):
             start_dt = None

@@ -160,6 +160,17 @@ import sys
 sys.stderr = StderrToLogger(logging.getLogger("STDERR"), logging.ERROR)
 
 
+def _fetch_activity(client, activity_id: int, include_all_efforts: bool = False, context: str = ""):
+    ctx = f" ({context})" if context else ""
+    logger.info(
+        "Strava get_activity(%s, include_all_efforts=%s)%s",
+        int(activity_id),
+        include_all_efforts,
+        ctx,
+    )
+    return client.get_activity(int(activity_id), include_all_efforts=include_all_efforts)
+
+
 def _get_fresh_client():
     """Crea un client stravalib con token sempre aggiornato."""
     from strava.auth import StravaAuth
@@ -512,7 +523,7 @@ def api_refresh_meta(activity_id):
     strava_id = row["strava_activity_id"]
     try:
         strava = StravaClient(_config, get_cache())
-        act_meta = _get_fresh_client().get_activity(int(strava_id))
+        act_meta = _fetch_activity(_get_fresh_client(), int(strava_id), context="refresh-meta")
         _save_strava_meta(get_cache(), activity_id, act_meta)
         return jsonify({"ok": True})
     except Exception as e:
@@ -574,7 +585,7 @@ def api_refresh_activity(activity_id):
                 strava, get_cache(), activity_id, int(row["strava_activity_id"])
             )
             try:
-                act_meta = _get_fresh_client().get_activity(int(row["strava_activity_id"]))
+                act_meta = _fetch_activity(_get_fresh_client(), int(row["strava_activity_id"]), context="refresh-activity")
                 _save_strava_meta(get_cache(), activity_id, act_meta)
             except Exception as ex:
                 logger.warning(f"refresh meta Strava fallito: {ex}")
@@ -631,7 +642,7 @@ def api_fetch_strava_efforts(activity_id):
         # Aggiorna strava_effort_source nel DB — essenziale per il colore pulsante
         get_cache().update_activity_strava_id(activity_id, int(strava_activity_id), "strava_api")
         try:
-            act_meta = _get_fresh_client().get_activity(int(strava_activity_id))
+            act_meta = _fetch_activity(_get_fresh_client(), int(strava_activity_id), context="fetch-strava-efforts")
             _save_strava_meta(get_cache(), activity_id, act_meta)
         except Exception as ex:
             logger.warning(f"Meta Strava non disponibili: {ex}")
@@ -1023,7 +1034,7 @@ def api_strava_import_activity():
 
     try:
         # 1. Recupera metadati attività
-        activity = client.get_activity(strava_activity_id)
+        activity = _fetch_activity(client, int(strava_activity_id), context="import-activity")
         act_name = activity.name or f"Strava {strava_activity_id}"
 
         # 2. Ricostruisci GPX dagli stream
