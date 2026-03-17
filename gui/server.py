@@ -102,6 +102,16 @@ def _get_effective_efforts_for_activity(activity_id):
     raw.sort(key=lambda e: (float(e.get("start_time_s") or 9e18), int(e.get("effort_id") or 0)))
     return raw
 
+
+def _count_efforts_with_avg_heartrate(activity_id: int) -> int:
+    row = get_cache()._conn.execute(
+        """SELECT COUNT(*) AS c
+           FROM efforts
+           WHERE activity_id=? AND average_heartrate IS NOT NULL""",
+        (activity_id,),
+    ).fetchone()
+    return int(row["c"] if row else 0)
+
 # ── Log stream per SSE ────────────────────────────────────────────
 import queue as _queue
 _log_queue = _queue.Queue(maxsize=500)
@@ -595,6 +605,7 @@ def api_refresh_activity(activity_id):
             "activity_id": activity_id,
             "segments_matched": len(r.get("segments_matched", [])),
             "strava_efforts": strava_saved,
+            "efforts_with_avg_heartrate": _count_efforts_with_avg_heartrate(activity_id),
             "gpx_stats": r.get("gpx_stats", {}),
         })
     except Exception as e:
@@ -657,7 +668,12 @@ def api_fetch_strava_efforts(activity_id):
                     break
         except Exception:
             pass
-        return jsonify({"ok": True, "saved": saved, "rate_limit": rl})
+        return jsonify({
+            "ok": True,
+            "saved": saved,
+            "efforts_with_avg_heartrate": _count_efforts_with_avg_heartrate(activity_id),
+            "rate_limit": rl,
+        })
     except Exception as e:
         import traceback
         err_detail = traceback.format_exc()
