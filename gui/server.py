@@ -105,6 +105,7 @@ def _get_effective_efforts_for_activity(activity_id):
 # ── Log stream per SSE ────────────────────────────────────────────
 import queue as _queue
 _log_queue = _queue.Queue(maxsize=500)
+_ORIGINAL_STDERR = sys.stderr
 
 class _QueueHandler(logging.Handler):
     def emit(self, record):
@@ -121,13 +122,23 @@ _qh = _QueueHandler()
 _qh.setFormatter(logging.Formatter("%(name)s: %(message)s"))
 _qh.setLevel(logging.INFO)
 
-# Rimuovi handler preesistenti per evitare doppi log su console se non voluti,
-# poi aggiungi _qh al root logger
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
-for h in root_logger.handlers[:]:
-    root_logger.removeHandler(h)
-root_logger.addHandler(_qh)
+
+def _configure_logging(verbose=False):
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+
+    # Handler SSE: sempre attivo per il viewer
+    if not any(isinstance(h, _QueueHandler) for h in root_logger.handlers):
+        root_logger.addHandler(_qh)
+
+    # Handler console: solo in --verbose
+    has_console = any(getattr(h, "_stravish_console", False) for h in root_logger.handlers)
+    if verbose and not has_console:
+        console = logging.StreamHandler(_ORIGINAL_STDERR)
+        console._stravish_console = True
+        console.setLevel(logging.DEBUG)
+        console.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        root_logger.addHandler(console)
 
 # Redirigi logger specifici
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
@@ -1060,9 +1071,10 @@ def api_strava_import_activity():
 # Avvio
 # ------------------------------------------------------------------ #
 
-def run_server(config, host="127.0.0.1", port=5757, open_browser=True):
+def run_server(config, host="127.0.0.1", port=5757, open_browser=True, verbose=False):
     global _config
     _config = config
+    _configure_logging(verbose=verbose)
 
     url = "http://{}:{}".format(host, port)
     print("\n🌐 stravish GUI  →  {}".format(url))
