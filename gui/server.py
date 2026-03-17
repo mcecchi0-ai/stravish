@@ -105,6 +105,7 @@ def _get_effective_efforts_for_activity(activity_id):
 # ── Log stream per SSE ────────────────────────────────────────────
 import queue as _queue
 _log_queue = _queue.Queue(maxsize=500)
+_ORIGINAL_STDERR = sys.stderr
 
 class _QueueHandler(logging.Handler):
     def emit(self, record):
@@ -121,13 +122,23 @@ _qh = _QueueHandler()
 _qh.setFormatter(logging.Formatter("%(name)s: %(message)s"))
 _qh.setLevel(logging.INFO)
 
-# Rimuovi handler preesistenti per evitare doppi log su console se non voluti,
-# poi aggiungi _qh al root logger
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
-for h in root_logger.handlers[:]:
-    root_logger.removeHandler(h)
-root_logger.addHandler(_qh)
+
+def _configure_logging(verbose=False):
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+
+    # Handler SSE: sempre attivo per il viewer
+    if not any(isinstance(h, _QueueHandler) for h in root_logger.handlers):
+        root_logger.addHandler(_qh)
+
+    # Handler console: solo in --verbose
+    has_console = any(getattr(h, "_stravish_console", False) for h in root_logger.handlers)
+    if verbose and not has_console:
+        console = logging.StreamHandler(_ORIGINAL_STDERR)
+        console._stravish_console = True
+        console.setLevel(logging.DEBUG)
+        console.setFormatter(logging.Formatter("%(levelname)s %(name)s %(filename)s:%(lineno)d: %(message)s"))
+        root_logger.addHandler(console)
 
 # Redirigi logger specifici
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
@@ -147,6 +158,17 @@ class StderrToLogger(object):
 
 import sys
 sys.stderr = StderrToLogger(logging.getLogger("STDERR"), logging.ERROR)
+
+
+def _fetch_activity(client, activity_id: int, include_all_efforts: bool = False, context: str = ""):
+    ctx = f" ({context})" if context else ""
+    logger.info(
+        "Strava get_activity(%s, include_all_efforts=%s)%s",
+        int(activity_id),
+        include_all_efforts,
+        ctx,
+    )
+    return client.get_activity(int(activity_id), include_all_efforts=include_all_efforts)
 
 
 def _get_fresh_client():
@@ -501,7 +523,7 @@ def api_refresh_meta(activity_id):
     strava_id = row["strava_activity_id"]
     try:
         strava = StravaClient(_config, get_cache())
-        act_meta = _get_fresh_client().get_activity(int(strava_id))
+        act_meta = _fetch_activity(_get_fresh_client(), int(strava_id), context="refresh-meta")
         _save_strava_meta(get_cache(), activity_id, act_meta)
         return jsonify({"ok": True})
     except Exception as e:
@@ -563,7 +585,7 @@ def api_refresh_activity(activity_id):
                 strava, get_cache(), activity_id, int(row["strava_activity_id"])
             )
             try:
-                act_meta = _get_fresh_client().get_activity(int(row["strava_activity_id"]))
+                act_meta = _fetch_activity(_get_fresh_client(), int(row["strava_activity_id"]), context="refresh-activity")
                 _save_strava_meta(get_cache(), activity_id, act_meta)
             except Exception as ex:
                 logger.warning(f"refresh meta Strava fallito: {ex}")
@@ -620,7 +642,7 @@ def api_fetch_strava_efforts(activity_id):
         # Aggiorna strava_effort_source nel DB — essenziale per il colore pulsante
         get_cache().update_activity_strava_id(activity_id, int(strava_activity_id), "strava_api")
         try:
-            act_meta = _get_fresh_client().get_activity(int(strava_activity_id))
+            act_meta = _fetch_activity(_get_fresh_client(), int(strava_activity_id), context="fetch-strava-efforts")
             _save_strava_meta(get_cache(), activity_id, act_meta)
         except Exception as ex:
             logger.warning(f"Meta Strava non disponibili: {ex}")
@@ -1012,7 +1034,7 @@ def api_strava_import_activity():
 
     try:
         # 1. Recupera metadati attività
-        activity = client.get_activity(strava_activity_id)
+        activity = _fetch_activity(client, int(strava_activity_id), context="import-activity")
         act_name = activity.name or f"Strava {strava_activity_id}"
 
         # 2. Ricostruisci GPX dagli stream
@@ -1060,9 +1082,10 @@ def api_strava_import_activity():
 # Avvio
 # ------------------------------------------------------------------ #
 
-def run_server(config, host="127.0.0.1", port=5757, open_browser=True):
+def run_server(config, host="127.0.0.1", port=5757, open_browser=True, verbose=False):
     global _config
     _config = config
+    _configure_logging(verbose=verbose)
 
     url = "http://{}:{}".format(host, port)
     print("\n🌐 stravish GUI  →  {}".format(url))
