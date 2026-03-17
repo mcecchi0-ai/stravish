@@ -7,6 +7,7 @@ Es.:
 /usr/local/bin/python3 run.py serve
 /usr/local/bin/python3 run.py auth login # rifare il token
 /usr/local/bin/python3 run.py cache clear
+/c/Users/mcecchi/AppData/Local/Microsoft/WindowsApps/PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0/python3.exe run.py --verbose serve
 
 ## Architettura
 

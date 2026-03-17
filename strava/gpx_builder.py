@@ -50,10 +50,10 @@ def build_gpx_from_streams(client, strava_activity_id: int, activity_name: str =
     start_dt = None
     try:
         logger.info(
-            "Strava get_activity(%s, include_all_efforts=False) (gpx_builder.start_date)",
+            "Strava get_activity(%s, include_all_efforts=True) (gpx_builder.start_date)",
             int(strava_activity_id),
         )
-        activity = client.get_activity(int(strava_activity_id), include_all_efforts=False)
+        activity = client.get_activity(int(strava_activity_id), include_all_efforts=True)
         start_dt = activity.start_date
         if not isinstance(start_dt, datetime):
             start_dt = None
