@@ -137,7 +137,7 @@ def _configure_logging(verbose=False):
         console = logging.StreamHandler(_ORIGINAL_STDERR)
         console._stravish_console = True
         console.setLevel(logging.DEBUG)
-        console.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        console.setFormatter(logging.Formatter("%(levelname)s %(name)s %(filename)s:%(lineno)d: %(message)s"))
         root_logger.addHandler(console)
 
 # Redirigi logger specifici
