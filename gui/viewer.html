@@ -91,6 +91,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .tree-seg-name{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tree-seg-meta{font-size:10px;color:var(--text2);margin-top:1px}
 .tree-seg-time{font-size:11px;font-weight:700;color:var(--orange);white-space:nowrap;flex-shrink:0}
+.effort-delete{opacity:0;font-size:12px;margin-left:4px;display:flex;align-items:center;transition:all .15s}
+.tree-seg:hover .effort-delete{opacity:.6}
+.tree-seg .effort-delete:hover{opacity:1;color:var(--orange)}
   #log-panel{position:fixed;bottom:0;left:0;right:0;height:0;background:var(--bg);border-top:1px solid var(--border);transition:height .2s ease;overflow:hidden;z-index:1000;display:flex;flex-direction:column}
   #log-panel.open{height:140px}
   #log-header{padding:4px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);flex-shrink:0}
@@ -377,7 +380,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 </div>
 
 <script>
-const API = 'http://127.0.0.1:5757';
+const API = '';
 let map, panMode = true;
 let allActivities = [], currentActivityId = null, currentEfforts = [];
 let activeSegmentId = null, speedChart = null;
@@ -902,6 +905,7 @@ function populateTree(actId, efforts) {
         <div class="tree-seg-meta">${dist}${grade?' · '+grade:''}${vamTag}</div>
       </div>
       <div class="tree-seg-time">${formatTime(e.elapsed_seconds)}</div>
+      <div class="effort-delete" data-effort-id="${e.effort_id}" title="Elimina effort">🗑</div>
     </div>`;
   }).join('');
 
@@ -1216,24 +1220,41 @@ document.getElementById('act-list').addEventListener('click', async e => {
   const id = +btn.dataset.id;
   const act = allActivities.find(a => a.activity_id === id);
   const name = act ? (act.activity_name || act.filename) : `#${id}`;
-  if (!confirm(`Ricalcolare aggregati e segmentizzazione per "${name}"?`)) return;
-  const old = btn.textContent;
-  btn.textContent = '⏳';
-  try {
-    await api(`/api/activities/${id}/refresh`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({activity_type:'cycling'})
-    });
-    await Promise.all([loadStatus(), loadActivities()]);
-    if (currentActivityId === id) {
-      await selectActivity(id, true);
+  if (!confirm(`Ricalcolare aggregati e segmentizzazione per "${name}"? Seleziona il file GPX dell'attività.`)) return;
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.gpx';
+  fileInput.onchange = async () => {
+    if (!fileInput.files.length) return;
+    const old = btn.textContent;
+    btn.textContent = '⏳';
+    const fd = new FormData();
+    fd.append('gpx', fileInput.files[0]);
+    try {
+      const resp = await fetch(`${API}/api/activities/${id}/refresh`, {
+        method:'POST',
+        body: fd
+      });
+      if (!resp.ok) {
+        let errMsg = await resp.text();
+        try { const d = JSON.parse(errMsg); errMsg = d.error || errMsg; } catch(err){}
+        throw new Error(errMsg);
+      }
+      await Promise.all([loadStatus(), loadActivities()]);
+      if (currentActivityId === id) {
+        const activeSeg = activeSegmentId;
+        currentActivityId = null;
+        await selectActivity(id);
+        if (activeSeg) await selectSegment(activeSeg);
+      }
+    } catch(err) {
+      alert(`Refresh fallito: ${err.message}`);
+    } finally {
+      btn.textContent = old;
     }
-  } catch(err) {
-    alert(`Refresh fallito: ${err.message}`);
-  } finally {
-    btn.textContent = old;
-  }
+  };
+  fileInput.click();
 }, true);
 
 document.getElementById('right-close').addEventListener('click', () => {
@@ -1371,6 +1392,24 @@ document.getElementById('act-list').addEventListener('click', async e => {
   const treeSeg = e.target.closest('.tree-seg');
   if (treeSeg) {
     e.stopPropagation();
+    const effDel = e.target.closest('.effort-delete');
+    if (effDel) {
+      const effortId = effDel.dataset.effortId;
+      if (!confirm("Eliminare definitivamente questo effort?")) return;
+      try {
+        await api(`/api/efforts/${effortId}`, {method:'DELETE'});
+        if (currentActivityId) {
+          const actId = currentActivityId;
+          const activeSeg = activeSegmentId;
+          currentActivityId = null;
+          await selectActivity(actId);
+          if (activeSeg) await selectSegment(activeSeg);
+        }
+      } catch (err) {
+        alert("Errore durante l'eliminazione: " + err.message);
+      }
+      return;
+    }
     selectSegment(+treeSeg.dataset.id);
     return;
   }

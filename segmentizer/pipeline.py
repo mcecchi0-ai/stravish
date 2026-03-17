@@ -159,10 +159,10 @@ class Segmentizer:
             bbox = gpx_bbox(points)
             buf  = 0.01
             cached_segs = self.cache.get_segments_in_bbox(
-                bbox[0]-buf, bbox[1]+buf, bbox[2]-buf, bbox[3]+buf
+                bbox.lat_min-buf, bbox.lat_max+buf, bbox.lng_min-buf, bbox.lng_max+buf
             )
             cached_segs = [s for s in cached_segs if s.polyline and s.source != 'auto']
-            track_bbox  = (bbox[0], bbox[1], bbox[2], bbox[3], buf)
+            track_bbox  = (bbox.lat_min, bbox.lat_max, bbox.lng_min, bbox.lng_max, buf)
             import calendar as _cal
             act_epoch_h = None
             if gpx_date:

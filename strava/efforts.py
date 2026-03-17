@@ -65,6 +65,14 @@ def fetch_and_store_strava_efforts(strava_client, cache: SegmentCache,
     saved = 0
     skipped = 0
     for se in raw_efforts:
+        logger.info(se)
+        hidden = getattr(se, 'hidden', False)
+        #TODO inserisci average_heartrate tra le info effort nella tabella di dettaglio
+        if hidden:
+            logger.info(f"Segmento {seg_id} '{getattr(seg,'name','?')}' nascosto — scartato")
+            skipped += 1
+            continue
+
         # se è un oggetto stravalib (DetailedSegmentEffort)
         seg = getattr(se, 'segment', None)
         if seg is None:
@@ -75,12 +83,6 @@ def fetch_and_store_strava_efforts(strava_client, cache: SegmentCache,
         seg_id = seg.id
         if not seg_id:
             logger.warning(f"Effort {getattr(se,'id','?')} seg senza id — scartato")
-            skipped += 1
-            continue
-
-        hidden = getattr(seg, 'private', False) or getattr(seg, 'hazardous', False)
-        if hidden:
-            logger.info(f"Segmento {seg_id} '{getattr(seg,'name','?')}' privato/hazardous — scartato")
             skipped += 1
             continue
 

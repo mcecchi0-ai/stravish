@@ -58,6 +58,12 @@ def _idx_overlap_ratio(a_start, a_end, b_start, b_end):
 
 
 def _effort_is_equivalent(a, b):
+    # Se sono effort su segmenti DIVERSI ma entrambi ufficiali da Strava API,
+    # non deduplichiamoli: l'utente vuole vedere tutti i cloni/varianti di segmenti riconosciuti da Strava.
+    if a.get("segment_id") != b.get("segment_id"):
+        if a.get("source") == "strava_api" and b.get("source") == "strava_api":
+            return False
+
     ov = _idx_overlap_ratio(a.get("start_idx"), a.get("end_idx"), b.get("start_idx"), b.get("end_idx"))
     if ov < 0.85:
         return False
@@ -87,43 +93,17 @@ def _source_rank(source):
 
 
 def _get_effective_efforts_for_activity(activity_id):
-    """Deduplica gli effort dell'attività preferendo match Strava stabili."""
+    """Restituisce tutto il raw DB degli effort associati, rimuovendo le dedupliche."""
     raw = get_cache().get_efforts_for_activity(activity_id)
     if not raw:
         return []
-
-    ordered = sorted(
-        raw,
-        key=lambda e: (
-            -_source_rank(e.get("source")),
-            -(float(e.get("distance_m") or 0.0)),
-            float(e.get("frechet_distance_m") or 0.0),
-            int(e.get("effort_id") or 0),
-        )
-    )
-
-    kept = []
-    for cand in ordered:
-        replaced = False
-        skip = False
-        for i, cur in enumerate(kept):
-            if not _effort_is_equivalent(cand, cur):
-                continue
-            if _source_rank(cand.get("source")) > _source_rank(cur.get("source")):
-                kept[i] = cand
-                replaced = True
-            else:
-                skip = True
-            break
-        if not skip and not replaced:
-            kept.append(cand)
-
-    kept.sort(key=lambda e: (float(e.get("start_time_s") or 9e18), int(e.get("effort_id") or 0)))
-    return kept
+    
+    # Ordinamento standard come richiesto dalla UI per default
+    raw.sort(key=lambda e: (float(e.get("start_time_s") or 9e18), int(e.get("effort_id") or 0)))
+    return raw
 
 # ── Log stream per SSE ────────────────────────────────────────────
 import queue as _queue
-logging.basicConfig(level=logging.INFO)
 _log_queue = _queue.Queue(maxsize=500)
 
 class _QueueHandler(logging.Handler):
@@ -138,9 +118,35 @@ class _QueueHandler(logging.Handler):
             pass
 
 _qh = _QueueHandler()
-_qh.setFormatter(logging.Formatter("%(message)s"))
-_qh.setLevel(logging.DEBUG)
-logging.getLogger().addHandler(_qh)
+_qh.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+_qh.setLevel(logging.INFO)
+
+# Rimuovi handler preesistenti per evitare doppi log su console se non voluti,
+# poi aggiungi _qh al root logger
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+for h in root_logger.handlers[:]:
+    root_logger.removeHandler(h)
+root_logger.addHandler(_qh)
+
+# Redirigi logger specifici
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+logging.getLogger("werkzeug").addHandler(_qh)
+logging.getLogger("segmentizer.pipeline").setLevel(logging.INFO)
+
+# Opzionale: cattura stampe su stderr standard (es. eccezioni non gestite nel thread)
+class StderrToLogger(object):
+    def __init__(self, logger_obj, level):
+        self.logger_obj = logger_obj
+        self.level = level
+    def write(self, buf):
+        for line in buf.rstrip().splitlines():
+            self.logger_obj.log(self.level, line.rstrip())
+    def flush(self):
+        pass
+
+import sys
+sys.stderr = StderrToLogger(logging.getLogger("STDERR"), logging.ERROR)
 
 
 def _get_fresh_client():
@@ -504,13 +510,12 @@ def api_refresh_meta(activity_id):
 
 @app.route("/api/activities/<int:activity_id>/refresh", methods=["POST"])
 def api_refresh_activity(activity_id):
-    """Ricalcola aggregati/segmentizzazione da GPX locale, poi aggiorna Strava."""
+    """Ricalcola aggregati/segmentizzazione da GPX locale o upload, poi aggiorna Strava."""
     from segmentizer.pipeline import Segmentizer
     from strava.client import StravaClient
     from strava.efforts import fetch_and_store_strava_efforts
 
-    data = request.get_json(silent=True) or {}
-    activity_type = data.get("activity_type", "cycling")
+    activity_type = request.form.get("activity_type", "cycling") if request.form else "cycling"
 
     row = get_cache()._conn.execute(
         """SELECT activity_id, filename, strava_activity_id, gpx_path
@@ -521,9 +526,22 @@ def api_refresh_activity(activity_id):
         return jsonify({"error": "Attività non trovata"}), 404
 
     gpx_path = row["gpx_path"]
+
+    if "gpx" in request.files:
+        f = request.files["gpx"]
+        payload = f.read()
+        safe_name = f.filename if f.filename else row["filename"]
+        gpx_path = _persist_gpx_payload(safe_name, payload)
+        
+        get_cache()._conn.execute(
+            "UPDATE activities SET gpx_path=? WHERE activity_id=?", 
+            (str(gpx_path), activity_id)
+        )
+        get_cache()._conn.commit()
+
     if not gpx_path or not Path(gpx_path).exists():
         return jsonify({
-            "error": "GPX sorgente non disponibile per refresh. Reimporta l'attività da file o Strava."
+            "error": "GPX sorgente non disponibile per refresh. Allega il file GPX dell'attività."
         }), 400
 
     # Reset effort esistenti per ricalcolo pulito
@@ -560,6 +578,13 @@ def api_refresh_activity(activity_id):
     except Exception as e:
         logger.error("api_refresh_activity error: %s", e)
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/efforts/<int:effort_id>", methods=["DELETE"])
+def api_delete_effort(effort_id):
+    get_cache()._conn.execute("DELETE FROM efforts WHERE effort_id=?", (effort_id,))
+    get_cache()._conn.commit()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/segments/<path:segment_id>/efforts")

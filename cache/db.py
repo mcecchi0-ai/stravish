@@ -435,7 +435,13 @@ class SegmentCache:
                  e.effort_id ASC""",
             (activity_id,)
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            if 'start_time_s' not in d:
+                d['start_time_s'] = None
+            result.append(d)
+        return result
 
     @staticmethod
     def _row_to_segment(row):
