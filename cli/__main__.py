@@ -271,7 +271,13 @@ def cmd_cache_clear(args, config):
 
 def cmd_serve(args, config):
     from gui.server import run_server
-    run_server(config, host=args.host, port=args.port, open_browser=not args.no_browser)
+    run_server(
+        config,
+        host=args.host,
+        port=args.port,
+        open_browser=not args.no_browser,
+        verbose=args.verbose,
+    )
 
 # ------------------------------------------------------------------
 # Parser + main
