@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="i18n.js"></script>
 <style>
 :root {
   --bg:#0f1117; --surface:#1a1d27; --surface2:#222536;
@@ -250,21 +251,21 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 <div id="topbar">
   <span class="logo">stravish</span>
-  <span id="db-status">Connessione…</span>
+  <span id="db-status" data-i18n="app.connecting"></span>
   <div class="spacer"></div>
-  <button class="btn sec" id="btn-sync-strava">⚡ Sync Strava</button>
-  <button class="btn sec" id="btn-import">+ Importa GPX</button>
-  <button class="btn sec" id="btn-settings" title="Impostazioni">⚙</button>
-  <button class="btn sec" id="btn-log" title="Log attività">📋 <span id="log-badge"></span></button>
+  <button class="btn sec" id="btn-sync-strava" data-i18n="btn.syncStrava"></button>
+  <button class="btn sec" id="btn-import" data-i18n="btn.import"></button>
+  <button class="btn sec" id="btn-settings" data-i18n-title="btn.settings">⚙</button>
+  <button class="btn sec" id="btn-log" data-i18n-title="btn.log">📋 <span id="log-badge"></span></button>
 </div>
 
 <div id="main">
 
   <!-- LEFT: activity list -->
   <div id="left">
-    <div id="left-header">Attività</div>
+    <div id="left-header" data-i18n="left.activities"></div>
     <div id="sync-log" style="display:none"></div>
-    <div id="act-list"><div style="padding:24px;text-align:center;color:var(--text2)">Caricamento…</div></div>
+    <div id="act-list"><div style="padding:24px;text-align:center;color:var(--text2)" data-i18n="left.loading"></div></div>
   </div>
 
   <!-- CENTER: map + segment strip -->
@@ -272,18 +273,18 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div id="map-wrap">
       <div id="map"></div>
       <div id="map-controls">
-        <div class="map-toggle active" id="toggle-pan">🔒 Pan</div>
-        <div class="map-toggle" id="toggle-fit">⊞ Fit</div>
+        <div class="map-toggle active" id="toggle-pan" data-i18n="map.pan"></div>
+        <div class="map-toggle" id="toggle-fit" data-i18n="map.fit"></div>
       </div>
       <div id="import-overlay">
         <div id="drop-zone">
           <div class="icon">🗺️</div>
-          <p>Trascina qui i tuoi file <strong>GPX</strong></p>
-          <small>oppure clicca per selezionarli</small>
+          <p data-i18n-html="import.dropTitle"></p>
+          <small data-i18n="import.dropSubtitle"></small>
         </div>
         <div id="import-progress">
           <span class="spinner">⟳</span>
-          <span id="import-msg">Importazione in corso…</span>
+          <span id="import-msg" data-i18n="import.inProgress"></span>
         </div>
         <input type="file" id="file-input" accept=".gpx" multiple style="display:none">
       </div>
@@ -305,12 +306,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 <!-- STRAVA LINK DIALOG (post-import manuale) -->
 <div id="strava-link-modal">
   <div id="strava-link-box">
-    <h3>🔗 Associa a Strava</h3>
-    <p>Incolla l'ID dell'attività Strava corrispondente per importare automaticamente tutti gli effort (es. da <code>strava.com/activities/<b>1234567890</b></code>).</p>
-    <input id="strava-link-id" type="number" placeholder="ID attività Strava (opzionale)">
+    <h3 data-i18n="stravaLink.title"></h3>
+    <p data-i18n-html="stravaLink.description"></p>
+    <input id="strava-link-id" type="number" data-i18n-placeholder="stravaLink.placeholder">
     <div id="strava-link-footer">
-      <button class="btn sec" id="strava-link-skip">Salta</button>
-      <button class="btn" id="strava-link-confirm">Importa effort</button>
+      <button class="btn sec" id="strava-link-skip" data-i18n="btn.skip"></button>
+      <button class="btn" id="strava-link-confirm" data-i18n="stravaLink.importEfforts"></button>
     </div>
   </div>
 </div>
@@ -319,45 +320,50 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 <div id="settings-modal">
   <div id="settings-box">
     <div id="settings-header">
-      <h3>⚙ Impostazioni</h3>
+      <h3 data-i18n="settings.title"></h3>
       <div class="close-btn" id="settings-close">✕</div>
     </div>
     <div id="settings-body">
-      <div class="settings-section">Profilo ciclista</div>
+      <div class="settings-section" data-i18n="settings.language"></div>
       <div class="settings-row">
-        <label>Peso ciclista (kg)</label>
+        <label data-i18n="settings.language"></label>
+        <select id="cfg-lang"></select>
+      </div>
+      <div class="settings-section" data-i18n="settings.cyclistProfile"></div>
+      <div class="settings-row">
+        <label data-i18n="settings.riderWeight"></label>
         <input type="number" id="cfg-weight" min="40" max="150" step="0.5" placeholder="75">
       </div>
       <div class="settings-row">
-        <label>Peso bici + attrezzatura (kg)</label>
+        <label data-i18n="settings.bikeWeight"></label>
         <input type="number" id="cfg-bike" min="5" max="30" step="0.5" placeholder="10">
       </div>
-      <div class="settings-section">Resistenza</div>
+      <div class="settings-section" data-i18n="settings.resistance"></div>
       <div class="settings-row">
-        <label>Coefficiente attrito (Crr)</label>
+        <label data-i18n="settings.crr"></label>
         <select id="cfg-crr">
-          <option value="0.003">Asfalto liscio / pista (0.003)</option>
-          <option value="0.005" selected>Asfalto normale (0.005)</option>
-          <option value="0.007">Asfalto ruvido / graniglia (0.007)</option>
-          <option value="0.012">Sterrato compatto (0.012)</option>
-          <option value="0.020">Sterrato / ghiaia (0.020)</option>
+          <option value="0.003" data-i18n="settings.crrSmooth"></option>
+          <option value="0.005" selected data-i18n="settings.crrNormal"></option>
+          <option value="0.007" data-i18n="settings.crrRough"></option>
+          <option value="0.012" data-i18n="settings.crrCompact"></option>
+          <option value="0.020" data-i18n="settings.crrGravel"></option>
         </select>
       </div>
-      <div class="settings-section">Posizione aerodinamica (CdA)</div>
+      <div class="settings-section" data-i18n="settings.aeroPosition"></div>
       <div class="settings-row">
-        <label>Posizione</label>
+        <label data-i18n="settings.position"></label>
         <select id="cfg-cda">
-          <option value="0.45">Eretta / MTB (0.45)</option>
-          <option value="0.36">Sportiva con mani sul manubrio (0.36)</option>
-          <option value="0.32" selected>Sportiva con mani sui manici (0.32)</option>
-          <option value="0.26">Bassa / gomiti sul tubo (0.26)</option>
-          <option value="0.22">TT / triathlon (0.22)</option>
+          <option value="0.45" data-i18n="settings.posUpright"></option>
+          <option value="0.36" data-i18n="settings.posHoods"></option>
+          <option value="0.32" selected data-i18n="settings.posDrops"></option>
+          <option value="0.26" data-i18n="settings.posAero"></option>
+          <option value="0.22" data-i18n="settings.posTT"></option>
         </select>
       </div>
     </div>
     <div id="settings-footer">
       <span id="settings-saved" style="font-size:11px;color:var(--green)"></span>
-      <button class="btn" id="settings-save">Salva</button>
+      <button class="btn" id="settings-save" data-i18n="btn.save"></button>
     </div>
   </div>
 </div>
@@ -366,24 +372,24 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div id="sync-box">
     <div id="sync-header">
       <span style="font-size:20px">⚡</span>
-      <h3>Attività Strava</h3>
-      <button class="btn sec" id="sync-select-all" style="font-size:11px;padding:4px 10px">Seleziona nuove</button>
+      <h3 data-i18n="sync.title"></h3>
+      <button class="btn sec" id="sync-select-all" style="font-size:11px;padding:4px 10px" data-i18n="btn.selectNew"></button>
       <div class="close-btn" id="sync-close">✕</div>
     </div>
-    <div id="sync-body"><div id="sync-status">Caricamento…</div></div>
+    <div id="sync-body"><div id="sync-status" data-i18n="left.loading"></div></div>
     <div id="sync-footer">
       <span class="sync-count" id="sync-count"></span>
-      <button class="btn sec" id="sync-cancel">Chiudi</button>
-      <button class="btn sec" id="sync-open-strava" style="display:none">↗ Apri Strava</button>
-      <button class="btn" id="sync-import-selected" style="display:none">⬇ Importa da Strava</button>
+      <button class="btn sec" id="sync-cancel" data-i18n="btn.close"></button>
+      <button class="btn sec" id="sync-open-strava" style="display:none" data-i18n="btn.openStrava"></button>
+      <button class="btn" id="sync-import-selected" style="display:none" data-i18n="btn.importFromStrava"></button>
     </div>
   </div>
 </div>
 
 <div id="log-drawer">
   <div id="log-header">
-    <span style="font-weight:700;font-size:12px">📋 Log attività</span>
-    <span id="log-clear" title="Pulisci">🗑</span>
+    <span style="font-weight:700;font-size:12px" data-i18n="log.title"></span>
+    <span id="log-clear" data-i18n-title="log.clear">🗑</span>
     <span id="log-close">✕</span>
   </div>
   <div id="log-body"></div>
@@ -395,6 +401,42 @@ let map, panMode = true;
 let allActivities = [], currentActivityId = null, currentEfforts = [];
 let activeSegmentId = null, activeEffortId = null, speedChart = null;
 let mapLayers = [];
+
+// ── I18N HELPERS ──────────────────────────────────────────────────
+function applyI18n() {
+  // Apply text content
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  // Apply HTML content
+  document.querySelectorAll('[data-i18n-html]').forEach(el => {
+    el.innerHTML = t(el.dataset.i18nHtml);
+  });
+  // Apply placeholders
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    el.placeholder = t(el.dataset.i18nPlaceholder);
+  });
+  // Apply titles
+  document.querySelectorAll('[data-i18n-title]').forEach(el => {
+    el.title = t(el.dataset.i18nTitle);
+  });
+  // Update HTML lang attribute
+  document.documentElement.lang = I18N.getLang();
+}
+
+function initLanguageSelector() {
+  const sel = document.getElementById('cfg-lang');
+  if (!sel) return;
+  sel.innerHTML = Object.entries(I18N.languages)
+    .map(([code, name]) => `<option value="${code}" ${code === I18N.getLang() ? 'selected' : ''}>${name}</option>`)
+    .join('');
+  sel.addEventListener('change', () => {
+    I18N.setLang(sel.value);
+    applyI18n();
+    renderActivities();
+    if (currentActivityId) showActivitySummary(currentActivityId);
+  });
+}
 
 // ── MAP ───────────────────────────────────────────────────────────
 map = L.map('map', {zoomControl:true}).setView([44, 12.5], 10);
@@ -434,10 +476,10 @@ async function loadStatus() {
   try {
     const s = await api('/api/status');
     document.getElementById('db-status').textContent =
-      `${s.activities} attività · ${s.segments} segmenti · ${s.efforts} effort`;
+      t('app.status', {activities: s.activities, segments: s.segments, efforts: s.efforts});
     if (s.activities > 0 || s.efforts > 0) hideImportOverlay();
   } catch(e) {
-    document.getElementById('db-status').textContent = '⚠ Server non raggiungibile';
+    document.getElementById('db-status').textContent = t('app.serverUnreachable');
   }
 }
 function hideImportOverlay() {
@@ -616,7 +658,7 @@ function attachNotesSave(ta) {
       });
       const act = allActivities.find(a => a.activity_id===id);
       if(act) act.notes = ta.value;
-      if(st) { st.textContent='✓ salvato'; setTimeout(()=>st.textContent='',2000); }
+      if(st) { st.textContent=t('misc.saved'); setTimeout(()=>st.textContent='',2000); }
     }, 800);
   });
 }
@@ -624,11 +666,11 @@ function attachNotesSave(ta) {
 function renderActivities() {
   const el = document.getElementById('act-list');
   if (!allActivities.length) {
-    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text2)">Nessuna attività.<br>Importa un file GPX.</div>';
+    el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text2)">${t('left.noActivities')}</div>`;
     return;
   }
   el.innerHTML = allActivities.map(a => {
-    const date = a.activity_date ? a.activity_date.slice(0,10) : 'data ignota';
+    const date = a.activity_date ? a.activity_date.slice(0,10) : t('left.unknownDate');
     const dist = (a.total_distance_m/1000).toFixed(1);
     const ele  = Math.round(a.total_elevation_m);
     const stravaCount = a.strava_effort_count || 0;
@@ -642,29 +684,29 @@ function renderActivities() {
       if (autoCount   > 0) parts.push(`<span class="act-seg-count auto-count">⬡${autoCount}</span>`);
       segBadge = `<div style="display:flex;gap:4px;margin-top:3px">${parts.join('')}</div>`;
     } else if (a.strava_activity_id) {
-      segBadge = `<div style="margin-top:3px"><span class="act-seg-count no-seg">nessun segmento</span></div>`;
+      segBadge = `<div style="margin-top:3px"><span class="act-seg-count no-seg">${t('left.noSegment')}</span></div>`;
     }
     return `<div class="act-item ${a.activity_id===currentActivityId?'active':''}" data-id="${a.activity_id}">
       <div style="display:flex;align-items:center;gap:4px">
         <div class="act-name" style="flex:1">${a.filename.replace('.gpx','')}</div>
         ${a.effort_count>0 ? `<span class="act-expand ${a.activity_id===currentActivityId?'open':''}" data-expand="${a.activity_id}">▶</span>` : ''}
       </div>
-      <div class="act-meta">${date} · ${dist} km · +${ele} m
-        <span class="act-refresh" data-id="${a.activity_id}" title="Ricalcola aggregati e segmentizzazione">🔄</span>
-        <span class="act-delete" data-id="${a.activity_id}" title="Elimina attività">🗑</span>
+      <div class="act-meta">${date} · ${dist} ${t('unit.km')} · +${ele} ${t('unit.m')}
+        <span class="act-refresh" data-id="${a.activity_id}" title="${t('left.refreshTitle')}">🔄</span>
+        <span class="act-delete" data-id="${a.activity_id}" title="${t('left.deleteTitle')}">🗑</span>
       </div>
       ${segBadge}
       <div class="strava-fetch-bar">
-        <input class="strava-id-input" type="number" placeholder="Strava Activity ID"
+        <input class="strava-id-input" type="number" placeholder="${t('left.stravaIdPlaceholder')}"
                data-id="${a.activity_id}" value="${a.strava_activity_id||''}"
-               title="ID numerico dell'attività Strava">
+               title="${t('left.stravaIdTitle')}">
         <button class="fetch-btn" data-id="${a.activity_id}"
                 style="${a.strava_effort_count>0?'background:var(--green)':''}">
           ${a.strava_effort_count>0?'⟳ Strava':'⚡ Strava'}
         </button>
       </div>
       <div class="fetch-status" id="fs-${a.activity_id}">
-        ${a.strava_effort_count>0?`<span style="color:var(--green)">✓ ${a.strava_effort_count} da Strava</span>`:''}
+        ${a.strava_effort_count>0?`<span style="color:var(--green)">✓ ${a.strava_effort_count} ${t('left.fromStrava')}</span>`:''}
       </div>
       <div class="act-tree ${a.activity_id===currentActivityId?'open':''}" id="tree-${a.activity_id}"></div>
 
@@ -776,7 +818,7 @@ async function showActivitySummary(id) {
     ]);
     renderActivitySummary(s, medals, powerBests.bests || []);
   } catch(e) {
-    document.getElementById('right-body').innerHTML = `<div style="padding:16px;color:var(--orange)">Errore: ${e.message}</div>`;
+    document.getElementById('right-body').innerHTML = `<div style="padding:16px;color:var(--orange)">${t('error.generic', {message: e.message})}</div>`;
   }
 }
 
@@ -794,15 +836,15 @@ function renderActivitySummary(s, medals, powerBests) {
 
   // Celle semplici (sempre visibili)
   const simpleCells = [
-    { label: 'Distanza',   value: s.total_distance_m >= 1000 ? (s.total_distance_m/1000).toFixed(1)+' km' : (s.total_distance_m ? Math.round(s.total_distance_m)+' m' : '—') },
-    { label: 'Dislivello', value: s.total_elevation_m ? '+'+Math.round(s.total_elevation_m)+' m' : '—' },
-    { label: 'Tempo',      value: fmtTime(s.moving_time_s) || '—' },
-    { label: 'Potenza media',       value: s.avg_watts
-        ? `${fmt(s.avg_watts)} W`
+    { label: t('summary.distance'),   value: s.total_distance_m >= 1000 ? (s.total_distance_m/1000).toFixed(1)+' '+t('unit.km') : (s.total_distance_m ? Math.round(s.total_distance_m)+' '+t('unit.m') : '—') },
+    { label: t('summary.elevation'), value: s.total_elevation_m ? '+'+Math.round(s.total_elevation_m)+' '+t('unit.m') : '—' },
+    { label: t('summary.time'),      value: fmtTime(s.moving_time_s) || '—' },
+    { label: t('summary.avgPower'),       value: s.avg_watts
+        ? `${fmt(s.avg_watts)} ${t('unit.w')}`
         : (s.avg_watts_estimated
-            ? `<span style="color:var(--orange)" title="Stima modello fisico">${fmt(s.avg_watts_estimated)} W</span>`
+            ? `<span style="color:var(--orange)" title="${t('summary.estimatedTitle')}">${fmt(s.avg_watts_estimated)} ${t('unit.w')}</span>`
             : '—') },
-    { label: 'Calorie',    value: s.calories ? `${Math.round(s.calories)} kcal` : '—' },
+    { label: t('summary.calories'),    value: s.calories ? `${Math.round(s.calories)} ${t('unit.kcal')}` : '—' },
   ];
 
   const simpleCellsHtml = simpleCells.map(x => `
@@ -814,14 +856,14 @@ function renderActivitySummary(s, medals, powerBests) {
   // Riquadro BPM
   const hrHtml = `
     <div class="summary-compound">
-      <div class="compound-title">Freq. cardiaca</div>
+      <div class="compound-title">${t('summary.heartRate')}</div>
       <div class="compound-row">
-        <span class="compound-label">media</span>
-        <span class="compound-value ${!s.avg_heartrate?'empty':''}">${s.avg_heartrate ? fmt(s.avg_heartrate)+' bpm' : '—'}</span>
+        <span class="compound-label">${t('summary.avg')}</span>
+        <span class="compound-value ${!s.avg_heartrate?'empty':''}">${s.avg_heartrate ? fmt(s.avg_heartrate)+' '+t('unit.bpm') : '—'}</span>
       </div>
       <div class="compound-row">
-        <span class="compound-label">max</span>
-        <span class="compound-value ${!s.max_heartrate?'empty':''}">${s.max_heartrate ? fmt(s.max_heartrate)+' bpm' : '—'}</span>
+        <span class="compound-label">${t('summary.max')}</span>
+        <span class="compound-value ${!s.max_heartrate?'empty':''}">${s.max_heartrate ? fmt(s.max_heartrate)+' '+t('unit.bpm') : '—'}</span>
       </div>
       <div class="compound-row">
         <span class="compound-label">σ</span>
@@ -832,14 +874,14 @@ function renderActivitySummary(s, medals, powerBests) {
   // Riquadro Cadenza
   const cadHtml = `
     <div class="summary-compound">
-      <div class="compound-title">Cadenza</div>
+      <div class="compound-title">${t('summary.cadence')}</div>
       <div class="compound-row">
-        <span class="compound-label">media</span>
-        <span class="compound-value ${!s.avg_cadence?'empty':''}">${s.avg_cadence ? fmt(s.avg_cadence)+' rpm' : '—'}</span>
+        <span class="compound-label">${t('summary.avg')}</span>
+        <span class="compound-value ${!s.avg_cadence?'empty':''}">${s.avg_cadence ? fmt(s.avg_cadence)+' '+t('unit.rpm') : '—'}</span>
       </div>
       <div class="compound-row">
-        <span class="compound-label">max</span>
-        <span class="compound-value ${!s.max_cadence?'empty':''}">${s.max_cadence ? fmt(s.max_cadence)+' rpm' : '—'}</span>
+        <span class="compound-label">${t('summary.max')}</span>
+        <span class="compound-value ${!s.max_cadence?'empty':''}">${s.max_cadence ? fmt(s.max_cadence)+' '+t('unit.rpm') : '—'}</span>
       </div>
       <div class="compound-row">
         <span class="compound-label">σ</span>
@@ -859,22 +901,22 @@ function renderActivitySummary(s, medals, powerBests) {
     const d = s.activity_date;
     const datePart = d.slice(0,10);
     const timePart = d.length >= 16 ? d.slice(11,16) : '';
-    return timePart ? `${datePart} alle ${timePart}` : datePart;
+    return timePart ? `${datePart} ${t('summary.atTime')} ${timePart}` : datePart;
   })() : '';
   const effortBadge = s.effort_count > 0
-    ? `<span style="color:var(--green)">✓ ${s.effort_count} segmenti</span>`
-    : `<span style="color:var(--text2)">nessun segmento — usa ⚡ Strava</span>`;
+    ? `<span style="color:var(--green)">${t('summary.segments', {count: s.effort_count})}</span>`
+    : `<span style="color:var(--text2)">${t('summary.noSegments')}</span>`;
 
   const MEDAL_ICONS = ['🥇','🥈','🥉'];
   const medalsHtml = (medals && medals.length) ? `
     <div class="medals-section">
-      <div class="section-title" style="padding:0 0 6px">Premi di questa uscita</div>
+      <div class="section-title" style="padding:0 0 6px">${t('summary.medals')}</div>
       ${medals.map(m => `
         <div class="medal-row">
           <span class="medal-icon">${MEDAL_ICONS[m.rank-1]}</span>
           <span class="medal-name" onclick="selectSegment(${m.segment_id})" title="${m.name}">${m.name}</span>
           <span class="medal-time">${formatTime(m.elapsed_seconds)}</span>
-          <span class="medal-total">su ${m.total}</span>
+          <span class="medal-total">${t('misc.on')} ${m.total}</span>
         </div>`).join('')}
     </div>` : '';
 
@@ -882,7 +924,7 @@ function renderActivitySummary(s, medals, powerBests) {
   const POWER_MEDAL_ICONS = ['🥇','🥈','🥉'];
   const powerBestsHtml = (powerBests && powerBests.length) ? `
     <div class="power-bests-section">
-      <div class="section-title" style="padding:0 0 6px">⚡ Record di potenza (stimata)</div>
+      <div class="section-title" style="padding:0 0 6px">${t('summary.powerRecords')}</div>
       <div class="power-bests-grid">
         ${powerBests.map(pb => {
           const medalIcon = pb.rank <= 3 ? POWER_MEDAL_ICONS[pb.rank-1] : '';
@@ -892,10 +934,10 @@ function renderActivitySummary(s, medals, powerBests) {
           return `
           <div class="power-best-item ${rankClass}">
             <div style="display:flex;align-items:center;gap:4px">
-              <span class="power-best-interval">${pb.interval_min} min</span>
+              <span class="power-best-interval">${pb.interval_min} ${t('unit.min')}</span>
               ${medalIcon ? `<span style="font-size:14px">${medalIcon}</span>` : ''}
             </div>
-            <span class="power-best-value">${pb.watts} W</span>
+            <span class="power-best-value">${pb.watts} ${t('unit.w')}</span>
             <div style="display:flex;justify-content:space-between;align-items:center">
               <span class="power-best-range">${pb.start_fmt} → ${pb.end_fmt}</span>
               ${rankText ? `<span class="power-best-rank">${rankText}</span>` : ''}
@@ -907,9 +949,9 @@ function renderActivitySummary(s, medals, powerBests) {
 
   const notesHtml = `
     <div style="padding:10px 14px 14px">
-      <div class="section-title" style="padding:0 0 6px">Note</div>
+      <div class="section-title" style="padding:0 0 6px">${t('summary.notes')}</div>
       <textarea class="act-notes-area detail-notes" data-id="${s.activity_id}"
-        placeholder="Note sull'uscita…">${s.notes||''}</textarea>
+        placeholder="${t('summary.notesPlaceholder')}">${s.notes||''}</textarea>
       <div class="notes-saved" id="ns-${s.activity_id}"></div>
     </div>`;
 
@@ -930,13 +972,13 @@ function populateTree(actId, efforts) {
   if (!treeEl) return;
 
   if (!efforts.length) {
-    treeEl.innerHTML = '<div style="font-size:11px;color:var(--text2);padding:4px 0">Nessun segmento percorso</div>';
+    treeEl.innerHTML = `<div style="font-size:11px;color:var(--text2);padding:4px 0">${t('left.noSegmentRun')}</div>`;
     return;
   }
 
   treeEl.innerHTML = efforts.map((e, i) => {
     const dist = e.distance_m >= 1000
-      ? (e.distance_m/1000).toFixed(2)+' km' : Math.round(e.distance_m)+' m';
+      ? (e.distance_m/1000).toFixed(2)+' '+t('unit.km') : Math.round(e.distance_m)+' '+t('unit.m');
     const grade = e.avg_grade_pct
       ? (e.avg_grade_pct>0?'+':'')+e.avg_grade_pct.toFixed(1)+'%' : '';
     const vamTag = '';
@@ -948,7 +990,7 @@ function populateTree(actId, efforts) {
         <div class="tree-seg-meta">${dist}${grade?' · '+grade:''}${vamTag}</div>
       </div>
       <div class="tree-seg-time">${formatTime(e.elapsed_seconds)}</div>
-      <div class="effort-delete" data-effort-id="${e.effort_id}" title="Elimina effort">🗑</div>
+      <div class="effort-delete" data-effort-id="${e.effort_id}" title="${t('left.deleteEffortTitle')}">🗑</div>
     </div>`;
   }).join('');
 
@@ -994,7 +1036,7 @@ async function showEffortsOnMap(efforts, activeSegId, activeEffortId) {
               if (seg.length > 2) {
                 const gl = L.polyline(seg, {color:'#f5c400', weight:3, opacity:.8,
                   dashArray:'8,5'}).addTo(map);
-                gl.bindTooltip('Tratta non segmentata', {sticky:true});
+                gl.bindTooltip(t('map.unsegmentedSection'), {sticky:true});
                 mapLayers.push(gl);
               }
               seg = [];
@@ -1003,7 +1045,7 @@ async function showEffortsOnMap(efforts, activeSegId, activeEffortId) {
           if (seg.length > 2) {
             const gl = L.polyline(seg, {color:'#f5c400', weight:3, opacity:.8,
               dashArray:'8,5'}).addTo(map);
-            gl.bindTooltip('Tratta non segmentata', {sticky:true});
+            gl.bindTooltip(t('map.unsegmentedSection'), {sticky:true});
             mapLayers.push(gl);
           }
         }
@@ -1068,14 +1110,14 @@ async function selectSegment(segId, effortId) {
 
   // Carica storico del segmento
   document.getElementById('right-seg-name').textContent = effort ? effort.name : '—';
-  document.getElementById('right-body').innerHTML = '<div style="padding:24px;text-align:center;color:var(--text2)">Caricamento…</div>';
+  document.getElementById('right-body').innerHTML = `<div style="padding:24px;text-align:center;color:var(--text2)">${t('left.loading')}</div>`;
   document.getElementById('right').classList.add('open');
 
   try {
     const history = await api(`/api/segments/${segId}/efforts`);
     renderSegmentHistory(effort, history, effortId);  // passa effortId per evidenziare nella tabella
   } catch(e) {
-    document.getElementById('right-body').innerHTML = `<div style="padding:16px;color:var(--orange)">Errore: ${e.message}</div>`;
+    document.getElementById('right-body').innerHTML = `<div style="padding:16px;color:var(--orange)">${t('error.generic', {message: e.message})}</div>`;
   }
 }
 
@@ -1091,11 +1133,11 @@ function _segExtraStats(best, seg) {
       const crr = +(appSettings.crr||0.005);
       const cda = +(appSettings.cda||0.35);
       const d   = (seg ? (seg.distance_m||seg.distance) : best.distance_m) || 0;
-      const t   = best.elapsed_seconds || 0;
+      const tt   = best.elapsed_seconds || 0;
       // Dislivello da pendenza × distanza (più affidabile di elev_difference)
       const el  = grade / 100 * d;
-      if (d > 0 && t > 0 && el > 0) {
-        const v = d/t;
+      if (d > 0 && tt > 0 && el > 0) {
+        const v = d/tt;
         const slope = el/d;
         const fg = m*9.81*Math.sin(Math.atan(slope));
         const fr = m*9.81*Math.cos(Math.atan(slope))*crr;
@@ -1106,38 +1148,38 @@ function _segExtraStats(best, seg) {
   } catch(e) {}
   if (!vamBest && !wattBest) return '';
   const cells = [];
-  if (vamBest)  cells.push('<div class="stat-cell"><div class="label">VAM best</div><div class="value" style="color:var(--orange)">&#9650;'+vamBest+' m/h</div></div>');
-  if (wattBest) cells.push('<div class="stat-cell"><div class="label">Watt stimati</div><div class="value" style="color:var(--orange)">'+wattBest+' W</div></div>');
+  if (vamBest)  cells.push(`<div class="stat-cell"><div class="label">${t('segment.vamBest')}</div><div class="value" style="color:var(--orange)">&#9650;${vamBest} ${t('unit.mh')}</div></div>`);
+  if (wattBest) cells.push(`<div class="stat-cell"><div class="label">${t('segment.estimatedWatts')}</div><div class="value" style="color:var(--orange)">${wattBest} ${t('unit.w')}</div></div>`);
   return '<div class="seg-stats-bar" style="grid-template-columns:repeat('+cells.length+',1fr)">'+cells.join('')+'</div>';
 }
 
 function renderSegmentHistory(seg, efforts, activeEffortId) {
   if (!efforts.length) {
     document.getElementById('right-body').innerHTML =
-      '<div style="padding:24px;text-align:center;color:var(--text2)">Nessun effort storico.</div>';
+      `<div style="padding:24px;text-align:center;color:var(--text2)">${t('segment.noHistory')}</div>`;
     return;
   }
   const best = efforts[0];
   const dist = seg && seg.distance_m >= 1000
-    ? (seg.distance_m/1000).toFixed(2)+' km' : (seg ? Math.round(seg.distance_m)+' m' : '—');
+    ? (seg.distance_m/1000).toFixed(2)+' '+t('unit.km') : (seg ? Math.round(seg.distance_m)+' '+t('unit.m') : '—');
   const grade = seg && seg.avg_grade_pct
     ? (seg.avg_grade_pct>0?'+':'')+seg.avg_grade_pct.toFixed(1)+'%' : '—';
 
   let html = `
   <div class="seg-stats-bar">
-    <div class="stat-cell"><div class="label">Distanza</div><div class="value">${dist}</div></div>
-    <div class="stat-cell"><div class="label">Pendenza</div><div class="value">${grade}</div></div>
-    <div class="stat-cell"><div class="label">Best time</div><div class="value" style="color:var(--gold)">${formatTime(best.elapsed_seconds)}</div></div>
+    <div class="stat-cell"><div class="label">${t('segment.distance')}</div><div class="value">${dist}</div></div>
+    <div class="stat-cell"><div class="label">${t('segment.grade')}</div><div class="value">${grade}</div></div>
+    <div class="stat-cell"><div class="label">${t('segment.bestTime')}</div><div class="value" style="color:var(--gold)">${formatTime(best.elapsed_seconds)}</div></div>
   </div>
   ${_segExtraStats(best, seg)}
   <div class="chart-section">
-    <div class="section-title">Andamento nel tempo</div>
+    <div class="section-title">${t('segment.trendTitle')}</div>
     <div class="chart-container"><canvas id="speed-chart"></canvas></div>
   </div>
   <div class="efforts-section">
-    <div class="section-title">Storico (${efforts.length} effort)</div>
+    <div class="section-title">${t('segment.history', {count: efforts.length})}</div>
     <table class="efforts-table">
-      <thead><tr><th>#</th><th>Data</th><th>Tempo</th><th>km/h</th><th>bpm</th><th>VAM</th><th>Δ best</th></tr></thead>
+      <thead><tr><th>${t('table.rank')}</th><th>${t('table.date')}</th><th>${t('table.time')}</th><th>${t('table.speed')}</th><th>${t('table.hr')}</th><th>${t('table.vam')}</th><th>${t('table.delta')}</th></tr></thead>
       <tbody>${efforts.map(e => {
         const rc = e.rank<=3 ? `rank-${e.rank}` : 'rank-n';
         const delta = e.rank===1
@@ -1166,10 +1208,10 @@ function renderSegmentHistory(seg, efforts, activeEffortId) {
   const act = allActivities.find(a => a.activity_id === currentActivityId);
   if (act !== undefined) {
     html += `<div class="notes-panel">
-      <div class="section-title" style="padding:10px 14px 4px">Note uscita</div>
+      <div class="section-title" style="padding:10px 14px 4px">${t('segment.rideNotes')}</div>
       <div style="padding:0 14px 14px">
         <textarea class="act-notes-area detail-notes" data-id="${act.activity_id}"
-          placeholder="Note sull'uscita…">${act.notes||''}</textarea>
+          placeholder="${t('summary.notesPlaceholder')}">${act.notes||''}</textarea>
         <div class="notes-saved" id="ns-${act.activity_id}"></div>
       </div>
     </div>`;
@@ -1229,7 +1271,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
   e.stopPropagation();
   const segId = btn.dataset.segId;
   const segName = btn.closest('.tree-seg')?.querySelector('.tree-seg-name')?.textContent || segId;
-  if (!confirm(`Eliminare segmento "${segName}" e tutti i suoi effort storici?`)) return;
+  if (!confirm(t('confirm.deleteSegment', {name: segName}))) return;
   await api(`/api/segments/${segId}`, {method:'DELETE'});
   currentEfforts = currentEfforts.filter(ef => String(ef.segment_id) !== String(segId));
   if (currentActivityId) {
@@ -1248,7 +1290,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
   const id = +btn.dataset.id;
   const act = allActivities.find(a => a.activity_id === id);
   const name = act ? (act.activity_name || act.filename) : `#${id}`;
-  if (!confirm(`Eliminare "${name}" e tutti i suoi effort?`)) return;
+  if (!confirm(t('confirm.deleteActivity', {name: name}))) return;
   await api(`/api/activities/${id}`, {method:'DELETE'});
   if (currentActivityId === id) {
     currentActivityId = null;
@@ -1267,7 +1309,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
   const id = +btn.dataset.id;
   const act = allActivities.find(a => a.activity_id === id);
   const name = act ? (act.activity_name || act.filename) : `#${id}`;
-  if (!confirm(`Ricalcolare aggregati e segmentizzazione per "${name}"? Seleziona il file GPX dell'attività.`)) return;
+  if (!confirm(t('confirm.refresh', {name: name}))) return;
 
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
@@ -1296,7 +1338,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
         if (activeSeg) await selectSegment(activeSeg);
       }
     } catch(err) {
-      alert(`Refresh fallito: ${err.message}`);
+      alert(t('error.refreshFailed', {message: err.message}));
     } finally {
       btn.textContent = old;
     }
@@ -1339,7 +1381,7 @@ async function importFiles(files) {
   dropZone.style.display='none'; progress.style.display='block';
   const fd = new FormData();
   Array.from(files).forEach(f=>fd.append('gpx',f));
-  document.getElementById('import-msg').textContent=`Importazione di ${files.length} file…`;
+  document.getElementById('import-msg').textContent=t('import.importing', {count: files.length});
   try {
     const resp = await fetch(`${API}/api/import`,{method:'POST',body:fd});
     _pendingImportResults = await resp.json();
@@ -1347,7 +1389,7 @@ async function importFiles(files) {
     if (errors.length) {
       alert(errors.map(r=>`❌ ${r.filename}: ${r.error}`).join('\n'));
     }
-  } catch(e) { alert('Errore: '+e.message); _pendingImportResults=[]; }
+  } catch(e) { alert(t('error.generic', {message: e.message})); _pendingImportResults=[]; }
   overlay.style.display='none'; progress.style.display='none'; dropZone.style.display='';
   await Promise.all([loadStatus(), loadActivities()]);
   // Se c'è almeno un'attività importata con successo, proponi associazione Strava
@@ -1369,7 +1411,7 @@ async function tryAutoMatchStrava(activityId, filename) {
     if (data.strava_id) {
       // Match trovato — fetch effort automatico senza dialog
       const statusEl = document.getElementById('fs-' + activityId);
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text2)">⟳ Match Strava trovato (${data.name}), importo effort…</span>`;
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text2)">${t('fetch.matchFound', {name: data.name})}</span>`;
       const r2 = await fetch(`${API}/api/activities/${activityId}/strava-efforts`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({strava_activity_id: data.strava_id})
@@ -1430,7 +1472,7 @@ document.getElementById('strava-link-confirm').addEventListener('click', async (
       populateTree(actId, efforts);
       clearMapLayers(); showEffortsOnMap(efforts);
     }
-  } catch(e) { alert('Errore fetch effort Strava: '+e.message); }
+  } catch(e) { alert(t('error.stravaEffortFetch', {message: e.message})); }
   _pendingImportResults=[];
 });
 
@@ -1443,7 +1485,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
     const effDel = e.target.closest('.effort-delete');
     if (effDel) {
       const effortId = effDel.dataset.effortId;
-      if (!confirm("Eliminare definitivamente questo effort?")) return;
+      if (!confirm(t('confirm.deleteEffort'))) return;
       try {
         await api(`/api/efforts/${effortId}`, {method:'DELETE'});
         if (currentActivityId) {
@@ -1453,7 +1495,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
           await selectActivity(actId);
         }
       } catch (err) {
-        alert("Errore durante l'eliminazione: " + err.message);
+        alert(t('error.deletion', {message: err.message}));
       }
       return;
     }
@@ -1482,13 +1524,13 @@ document.getElementById('act-list').addEventListener('click', async e => {
     const statusEl = document.getElementById('fs-' + id);
     const stravaId = input ? input.value.trim() : '';
     if (!stravaId) {
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">⚠ Inserisci l'ID attività Strava</span>`;
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">${t('fetch.enterStravaId')}</span>`;
       return;
     }
     fetchBtn.disabled = true;
     const act0 = allActivities.find(a => a.activity_id===id);
     const actName = act0 ? (act0.activity_name || act0.filename) : `#${id}`;
-    if (statusEl) statusEl.innerHTML = '<span>⟳ Fetching…</span>';
+    if (statusEl) statusEl.innerHTML = `<span>${t('fetch.fetchingShort')}</span>`;
     syncLogStart(id, actName);
     try {
       const res = await fetch(`${API}/api/activities/${id}/strava-efforts`, {
@@ -1497,8 +1539,8 @@ document.getElementById('act-list').addEventListener('click', async e => {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      syncLogDone(id, `✓ ${actName}: ${data.saved} segmenti`, false);
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">✓ ${data.saved} effort importati da Strava</span>`;
+      syncLogDone(id, t('fetch.success', {name: actName, count: data.saved}), false);
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">${t('fetch.imported', {count: data.saved})}</span>`;
       fetchBtn.textContent = '⟳ Strava'; fetchBtn.style.background = 'var(--green)';
       const act = allActivities.find(a => a.activity_id===id);
       if (act) {
@@ -1516,8 +1558,8 @@ document.getElementById('act-list').addEventListener('click', async e => {
       }
       await loadStatus();
     } catch(err) {
-      syncLogDone(id, `⚠ ${actName}: ${err.message}`, true);
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">⚠ ${err.message}</span>`;
+      syncLogDone(id, t('fetch.error', {error: `${actName}: ${err.message}`}), true);
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">${t('fetch.error', {error: err.message})}</span>`;
     }
     fetchBtn.disabled = false;
     return;
@@ -1554,20 +1596,20 @@ function openSyncModal(){document.getElementById('sync-modal').classList.add('op
 function closeSyncModal(){document.getElementById('sync-modal').classList.remove('open')}
 
 async function loadStravaActivities(){
-  document.getElementById('sync-body').innerHTML='<div id="sync-status">Caricamento attività da Strava…</div>';
+  document.getElementById('sync-body').innerHTML=`<div id="sync-status">${t('sync.loading')}</div>`;
   document.getElementById('sync-open-strava').style.display='none';
   try {
     stravaActivities = await api('/api/strava/activities');
     renderStravaList();
   } catch(e) {
     document.getElementById('sync-body').innerHTML=
-      `<div id="sync-status" style="color:var(--orange)">⚠ ${e.message}<br><small>Esegui: python run.py auth login</small></div>`;
+      `<div id="sync-status" style="color:var(--orange)">${t('sync.authError', {error: e.message})}</div>`;
   }
 }
 
 function renderStravaList(){
   const body=document.getElementById('sync-body');
-  if(!stravaActivities.length){body.innerHTML='<div id="sync-status">Nessuna attività.</div>';return}
+  if(!stravaActivities.length){body.innerHTML=`<div id="sync-status">${t('sync.noActivities')}</div>`;return}
   body.innerHTML=stravaActivities.map(a=>{
     const date=a.start_date?a.start_date.slice(0,10):'—';
     const dist=(a.distance_m/1000).toFixed(1);
@@ -1576,7 +1618,7 @@ function renderStravaList(){
       <input type="checkbox" ${a.imported?'disabled checked':''} data-id="${a.strava_id}" onchange="updateSyncCount()">
       <div class="strava-act-info">
         <div class="strava-act-name">${a.name}</div>
-        <div class="strava-act-meta">${date} · ${dist} km · +${ele} m · ${a.sport_type}</div>
+        <div class="strava-act-meta">${date} · ${dist} ${t('unit.km')} · +${ele} ${t('unit.m')} · ${a.sport_type}</div>
       </div>
       ${a.imported?'<span class="imported-badge">✓</span>':''}
       <a class="strava-link" href="https://www.strava.com/activities/${a.strava_id}" target="_blank">↗</a>
@@ -1592,7 +1634,7 @@ document.getElementById('sync-import-selected').addEventListener('click', async 
   if (!checked.length) return;
   const btn = document.getElementById('sync-import-selected');
   btn.disabled = true;
-  btn.textContent = '⟳ Importazione…';
+  btn.textContent = t('btn.importing');
   let done=0, errors=0;
   for (const cb of checked) {
     const row = cb.closest('.strava-act-row');
