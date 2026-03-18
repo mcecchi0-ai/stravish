@@ -95,20 +95,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .effort-delete{opacity:0;font-size:12px;margin-left:4px;display:flex;align-items:center;transition:all .15s}
 .tree-seg:hover .effort-delete{opacity:.6}
 .tree-seg .effort-delete:hover{opacity:1;color:var(--orange)}
-  #log-panel{position:fixed;bottom:0;left:0;right:0;height:0;background:var(--bg);border-top:1px solid var(--border);transition:height .2s ease;overflow:hidden;z-index:1000;display:flex;flex-direction:column}
-  #log-panel.open{height:140px}
-  #log-header{padding:4px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);flex-shrink:0}
-  #log-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);flex:1}
-  #log-clear{font-size:10px;color:var(--text2);cursor:pointer;padding:2px 6px;border:1px solid var(--border);border-radius:3px;background:none}
-  #log-close{font-size:12px;color:var(--text2);cursor:pointer;line-height:1}
-  #log-body{flex:1;overflow-y:auto;padding:4px 12px;font-family:monospace;font-size:11px;display:flex;flex-direction:column;gap:1px}
-  .log-row{display:flex;gap:8px;line-height:1.5}
-  .log-ts{color:var(--text2);flex-shrink:0}
-  .log-msg{color:var(--text);white-space:pre-wrap;word-break:break-all}
-  .log-row.WARNING .log-msg,.log-row.ERROR .log-msg{color:#e06c6c}
-  .log-row.INFO .log-msg{color:var(--text)}
-  .log-row.active-op .log-msg{color:var(--orange);font-weight:600}
-  #log-badge{display:none;position:fixed;bottom:8px;right:8px;background:var(--orange);color:white;border-radius:12px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;z-index:1001;box-shadow:0 2px 8px rgba(0,0,0,.4)}
   #sync-log{background:var(--surface);border-bottom:1px solid var(--border);padding:6px 12px;font-size:11px;display:flex;flex-direction:column;gap:3px;max-height:120px;overflow-y:auto}
   .sync-log-row{display:flex;align-items:center;gap:6px;color:var(--text2)}
   .sync-log-row .sync-spinner{animation:spin .8s linear infinite;display:inline-block}
@@ -122,19 +108,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   .act-item:hover .act-delete:hover{opacity:1}
   .act-item:hover .act-refresh:hover{opacity:1}
   .tree-seg-vam{font-size:10px;font-weight:600;color:var(--orange);background:rgba(252,76,2,.12);border-radius:3px;padding:1px 4px;margin-left:5px}
-  #log-drawer{position:fixed;bottom:0;left:0;right:0;height:220px;background:var(--bg);border-top:1px solid var(--border);display:flex;flex-direction:column;transform:translateY(100%);transition:transform .2s ease;z-index:1500}
-  #log-drawer.open{transform:translateY(0)}
-  #log-header{display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid var(--border);flex-shrink:0}
-  #log-header span:not(:first-child){cursor:pointer;opacity:.6;font-size:13px;margin-left:auto}
-  #log-header span:not(:first-child):hover{opacity:1}
-  #log-clear{margin-left:auto!important}
-  #log-body{flex:1;overflow-y:auto;padding:6px 10px;font-family:monospace;font-size:11px;display:flex;flex-direction:column;gap:2px}
-  .log-entry{padding:2px 6px;border-radius:3px;white-space:pre-wrap;word-break:break-all}
-  .log-entry.INFO{color:var(--text)}
-  .log-entry.WARNING{color:#f0b429;background:rgba(240,180,41,.08)}
-  .log-entry.ERROR{color:#e05c5c;background:rgba(224,92,92,.10)}
-  .log-entry.DEBUG{color:var(--text2)}
-  #log-badge{font-size:10px;background:#e05c5c;color:#fff;border-radius:8px;padding:0 5px;display:none}
   #settings-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;align-items:center;justify-content:center}
   #settings-modal.open{display:flex}
   #settings-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:420px;max-width:95vw;display:flex;flex-direction:column;overflow:hidden}
@@ -256,7 +229,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <button class="btn sec" id="btn-sync-strava" data-i18n="btn.syncStrava"></button>
   <button class="btn sec" id="btn-import" data-i18n="btn.import"></button>
   <button class="btn sec" id="btn-settings" data-i18n-title="btn.settings">⚙</button>
-  <button class="btn sec" id="btn-log" data-i18n-title="btn.log">📋 <span id="log-badge"></span></button>
 </div>
 
 <div id="main">
@@ -386,15 +358,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   </div>
 </div>
 
-<div id="log-drawer">
-  <div id="log-header">
-    <span style="font-weight:700;font-size:12px" data-i18n="log.title"></span>
-    <span id="log-clear" data-i18n-title="log.clear">🗑</span>
-    <span id="log-close">✕</span>
-  </div>
-  <div id="log-body"></div>
-</div>
-
 <script>
 const API = '';
 let map, panMode = true;
@@ -433,6 +396,7 @@ function initLanguageSelector() {
   sel.addEventListener('change', () => {
     I18N.setLang(sel.value);
     applyI18n();
+    loadStatus(); // Ricarica lo status con la lingua aggiornata
     renderActivities();
     if (currentActivityId) showActivitySummary(currentActivityId);
   });
@@ -492,76 +456,7 @@ async function loadActivities() {
   renderActivities();
 }
 
-// ── LOG PANEL SSE ────────────────────────────────────────────────
-let _activeOps = 0;
-
-function logPanel() { return document.getElementById('log-drawer'); }
-function logBody()  { return document.getElementById('log-body'); }
-
-function addLog(ts, level, msg) {
-  const body = logBody();
-  if (!body) return;
-
-  // Determina se è un'operazione attiva (fetch in corso)
-  const isActive = /fetching|in corso|processing|importati|rate limit|strava restituisce/i.test(msg);
-  const row = document.createElement('div');
-  row.className = `log-row ${level}${isActive?' active-op':''}`;
-  row.innerHTML = `<span class="log-ts">${ts}</span><span class="log-msg">${msg}</span>`;
-  body.appendChild(row);
-  // Mantieni max 200 righe
-  while (body.children.length > 200) body.removeChild(body.firstChild);
-  body.scrollTop = body.scrollHeight;
-
-  // Apri pannello automaticamente per WARNING/ERROR o operazioni attive
-  if (level === 'WARNING' || level === 'ERROR' || isActive) {
-    logPanel().classList.add('open');
-    document.getElementById('log-badge').style.display = 'none';
-  }
-}
-
-function startSSELog() {
-  const es = new EventSource(`${API}/api/logs/stream`);
-  es.onmessage = e => {
-    try {
-      const d = JSON.parse(e.data);
-      addLog(d.ts, d.level, d.msg);
-    } catch {}
-  };
-  es.onerror = () => {
-    // riconnette automaticamente
-  };
-}
-
-document.getElementById('btn-log').addEventListener('click', () => {
-  logPanel().classList.toggle('open');
-  if (logPanel().classList.contains('open')) {
-    document.getElementById('log-badge').style.display = 'none';
-    logBody().scrollTop = logBody().scrollHeight;
-  }
-});
-
-document.getElementById('log-close').addEventListener('click', () => {
-  logPanel().classList.remove('open');
-  const badge = document.getElementById('log-badge');
-  badge.style.display = 'block';
-  // Aggiorna badge con ultimo messaggio
-  const rows = logBody().children;
-  if (rows.length) {
-    const last = rows[rows.length-1].querySelector('.log-msg');
-    document.getElementById('log-badge-text').textContent =
-      (last?.textContent || '').slice(0,40);
-  }
-});
-document.getElementById('log-badge').addEventListener('click', () => {
-  logPanel().classList.add('open');
-  document.getElementById('log-badge').style.display = 'none';
-  logBody().scrollTop = logBody().scrollHeight;
-});
-document.getElementById('log-clear').addEventListener('click', () => {
-  logBody().innerHTML = '';
-});
-
-// ── SYNC LOG ─────────────────────────────────────────────────────
+// ── SYNC LOG
 const _syncActive = new Map(); // activityId → {name, startTime}
 
 function syncLogUpdate() {
@@ -1104,7 +999,8 @@ async function selectSegment(segId, effortId) {
       const hl0 = L.polyline(coords, {color:'#fff', weight:9, opacity:.6}).addTo(map);
       const hl1 = L.polyline(coords, {color:'#ffe000', weight:5, opacity:1}).addTo(map);
       mapLayers.push(hl0, hl1);
-      mapFocusLayer(hl0);
+      // In pan mode non muovere la mappa quando si cambia segmento
+      if (!panMode) mapFocusLayer(hl0);
     } catch(ex){}
   }
 
@@ -1699,9 +1595,9 @@ function decodePolyline(str){
 
 // ── INIT ──────────────────────────────────────────────────────────
 (async()=>{
+  applyI18n();
+  initLanguageSelector();
   await Promise.all([loadStatus(), loadActivities(), loadSettings()]);
-  loadRateLimit();
-  startSSELog();
   // Automatch in background — non blocca il rendering
   setTimeout(async () => {
     try {
