@@ -419,6 +419,9 @@ def api_set_settings():
     data = request.get_json(force=True)
     for k, v in data.items():
         get_cache().set_setting(k, v)
+    # Invalida power bests (dipendono da peso, crr, cda)
+    get_cache()._conn.execute("DELETE FROM power_bests")
+    get_cache()._conn.commit()
     return jsonify({"ok": True})
 
 
@@ -986,109 +989,107 @@ def api_activity_power_bests(activity_id):
     if len(points) < 10:
         return jsonify({"error": "GPX con pochi punti validi", "bests": []})
 
-    # Calcola potenza istantanea per ogni segmento tra punti consecutivi
-    # P = (F_grav + F_roll + F_aero) * v
-    power_segments = []  # lista di {t_start, t_end, watts, dt}
+    # ── Outlier detection MAD-based sulle velocità ────────────────
+    # Calcola tutte le velocità punto-punto valide
+    import statistics as _stats
+    raw_speeds = []
+    for i in range(1, len(points)):
+        dt = points[i]["t_s"] - points[i-1]["t_s"]
+        dd = points[i]["dist_from_start_m"] - points[i-1]["dist_from_start_m"]
+        if dt >= 1.0 and dd > 0:
+            raw_speeds.append(dd / dt)
+
+    if not raw_speeds:
+        return jsonify({"error": "Nessun segmento valido", "bests": []})
+
+    # Soglia: mediana + 6 * MAD (robusto contro GPS glitch)
+    v_median = _stats.median(raw_speeds)
+    v_mad = _stats.median([abs(v - v_median) for v in raw_speeds])
+    v_threshold = v_median + 6.0 * max(v_mad, 0.5)
+
+    MAX_SLOPE = 0.35        # 35%
+
+    # Calcola potenza istantanea — outlier di velocità SCARTATI, non corretti
+    power_segments = []
 
     for i in range(1, len(points)):
         p0, p1 = points[i-1], points[i]
         dt = p1["t_s"] - p0["t_s"]
-        if dt <= 0:
+        if dt < 1.0:
             continue
 
         dd = p1["dist_from_start_m"] - p0["dist_from_start_m"]
-        de = p1["ele"] - p0["ele"]
-
         if dd <= 0:
             continue
 
-        v = dd / dt  # m/s
-        slope = de / dd if dd > 0 else 0
+        v = dd / dt
+        if v > v_threshold:
+            continue  # outlier GPS: scarta intero segmento
 
-        # Forze
+        de = p1["ele"] - p0["ele"]
+        slope = max(-MAX_SLOPE, min(MAX_SLOPE, de / dd))
+
         f_grav = m_tot * g * math.sin(math.atan(slope))
         f_roll = m_tot * g * math.cos(math.atan(slope)) * crr
         f_aero = 0.5 * rho * cda * v * v
-
-        # Potenza (può essere negativa in discesa)
-        p_inst = (f_grav + f_roll + f_aero) * v
+        p_inst = max(0.0, (f_grav + f_roll + f_aero) * v)
 
         power_segments.append({
             "t_start": p0["t_s"],
             "t_end": p1["t_s"],
             "watts": p_inst,
-            "dt": dt,
         })
 
     if not power_segments:
         return jsonify({"error": "Nessun segmento valido", "bests": []})
 
-    # Intervalli in secondi
-    intervals_min = [5, 10, 15, 20, 25, 30, 40, 45, 55, 60]
-    intervals_s = [m * 60 for m in intervals_min]
+    # ── Resample a 1s + prefix-sum → sliding window O(n) ─────────
+    total_secs = int(power_segments[-1]["t_end"]) + 1
+    power_1s = [0.0] * total_secs
 
-    total_duration = power_segments[-1]["t_end"]
+    for seg in power_segments:
+        w = seg["watts"]
+        for s in range(max(0, int(seg["t_start"])), min(total_secs, int(seg["t_end"]))):
+            power_1s[s] = w
+
+    prefix = [0.0] * (total_secs + 1)
+    for i in range(total_secs):
+        prefix[i + 1] = prefix[i] + power_1s[i]
+
+    def _fmt_time(s):
+        m = int(s) // 60
+        sec = int(s) % 60
+        return f"{m}m{sec:02d}s"
+
+    intervals_min = [5, 10, 15, 20, 25, 30, 40, 45, 55, 60]
     bests = []
 
-    for interval_s, interval_min in zip(intervals_s, intervals_min):
-        if total_duration < interval_s:
-            # Durata totale insufficiente per questo intervallo
+    for interval_min in intervals_min:
+        win = interval_min * 60
+        if total_secs < win:
             continue
 
-        # Sliding window: trova la finestra con potenza media massima
-        best_watts = None
+        best_watts = 0.0
         best_start = 0
-        best_end = 0
 
-        # Scorri con step di ~1 secondo (o un segmento)
-        window_start = 0.0
-        step = max(1.0, interval_s / 300)  # step adattivo
+        for start in range(total_secs - win + 1):
+            avg_w = (prefix[start + win] - prefix[start]) / win
+            if avg_w > best_watts:
+                best_watts = avg_w
+                best_start = start
 
-        while window_start + interval_s <= total_duration:
-            window_end = window_start + interval_s
-
-            # Calcola potenza media nella finestra
-            total_energy = 0.0
-            total_time = 0.0
-
-            for seg in power_segments:
-                # Intersezione tra segmento e finestra
-                seg_start = max(seg["t_start"], window_start)
-                seg_end = min(seg["t_end"], window_end)
-
-                if seg_end > seg_start:
-                    dt_in_window = seg_end - seg_start
-                    total_energy += seg["watts"] * dt_in_window
-                    total_time += dt_in_window
-
-            if total_time > 0:
-                avg_watts = total_energy / total_time
-
-                if best_watts is None or avg_watts > best_watts:
-                    best_watts = avg_watts
-                    best_start = window_start
-                    best_end = window_end
-
-            window_start += step
-
-        if best_watts is not None and best_watts > 0:
-            # Formatta tempi in mm:ss
-            def fmt_time(s):
-                m = int(s) // 60
-                sec = int(s) % 60
-                return f"{m}m{sec:02d}s"
-
+        if best_watts > 0:
             bests.append({
                 "interval_min": interval_min,
-                "interval_minutes": interval_min,  # alias per compatibilità DB
+                "interval_minutes": interval_min,
                 "watts": round(best_watts),
-                "start_s": round(best_start),
-                "end_s": round(best_end),
-                "start_fmt": fmt_time(best_start),
-                "end_fmt": fmt_time(best_end),
+                "start_s": best_start,
+                "end_s": best_start + win,
+                "start_fmt": _fmt_time(best_start),
+                "end_fmt": _fmt_time(best_start + win),
             })
 
-    # Salva i power bests nel database per storicizzazione e ranking
+    # Salva nel DB per ranking
     if bests:
         get_cache().save_power_bests(activity_id, bests)
 
@@ -1099,13 +1100,12 @@ def api_activity_power_bests(activity_id):
 def api_activity_power_bests_ranked(activity_id):
     """
     Restituisce i power bests di un'attività con rank rispetto a tutte le altre attività.
-    Se non esistono nel DB, prima li calcola chiamando l'endpoint principale.
+    Usa cache DB; ricalcola solo se mancanti o invalidi (valori assurdi pre-fix).
     """
-    # Controlla se già salvati
     existing = get_cache().get_power_bests_for_activity(activity_id)
-    if not existing:
-        # Non ci sono — prova a calcolarli chiamando direttamente l'endpoint
-        # Usa test_client per una chiamata HTTP locale
+    if not existing or any(b["watts"] > 2000 for b in existing):
+        if existing:
+            get_cache().delete_power_bests_for_activity(activity_id)
         with app.test_client() as client:
             resp = client.get(f"/api/activities/{activity_id}/power-bests")
             if resp.status_code != 200:

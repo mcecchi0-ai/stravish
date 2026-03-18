@@ -356,6 +356,7 @@ let map, panMode = true;
 let allActivities = [], currentActivityId = null, currentEfforts = [];
 let activeSegmentId = null, activeEffortId = null, speedChart = null;
 let mapLayers = [];
+let currentTrack = null, currentStreamLength = null;
 
 // ── I18N HELPERS ──────────────────────────────────────────────────
 function applyI18n() {
@@ -674,6 +675,8 @@ async function selectActivity(id) {
     activeSegmentId = null;
     activeEffortId = null;
     currentEfforts = [];
+    currentTrack = null;
+    currentStreamLength = null;
     document.getElementById('right').classList.remove('open');
     renderActivities();
     clearMapLayers();
@@ -892,6 +895,8 @@ async function showEffortsOnMap(efforts, activeSegId, activeEffortId) {
       const resp = await api(`/api/activities/${currentActivityId}/gpx-track`);
       const track = resp.track || resp; // compatibilità formato vecchio/nuovo
       const streamLength = resp.stream_length || null;
+      currentTrack = track;
+      currentStreamLength = streamLength;
 
       if (track && track.length > 1) {
         const gpxLayer = L.polyline(track, {
@@ -946,11 +951,22 @@ async function showEffortsOnMap(efforts, activeSegId, activeEffortId) {
     } catch(ex) { console.warn('GPX track load failed:', ex); }
   }
 
-  // 3. Segmenti Strava in arancio sopra
+  // 3. Segmenti sopra (Strava arancio, historical arancio chiaro, auto azzurro)
+  const effortColors = new Set(['#fc4c02','#ff8c42','#40b4e0']);
   efforts.forEach(e => {
-    if (!e.polyline) return;
+    let coords = null;
+    if (e.polyline) {
+      try { coords = decodePolyline(e.polyline).map(c=>[c[0],c[1]]); } catch(ex){}
+    }
+    if (!coords && e.start_idx != null && e.end_idx != null && currentTrack && currentTrack.length > 1) {
+      const sLen = currentStreamLength || e.total_points || currentTrack.length;
+      const tLen = currentTrack.length;
+      const si = Math.max(0, Math.round(e.start_idx * (tLen - 1) / (sLen - 1)));
+      const ei = Math.min(tLen - 1, Math.round(e.end_idx * (tLen - 1) / (sLen - 1)));
+      if (ei > si) coords = currentTrack.slice(si, ei + 1);
+    }
+    if (!coords || coords.length < 2) return;
     try {
-      const coords = decodePolyline(e.polyline).map(c=>[c[0],c[1]]);
       const effortColor = e.source==='historical' ? '#ff8c42'
                         : e.source==='auto'       ? '#40b4e0'
                         : '#fc4c02'; // strava_api
@@ -963,7 +979,7 @@ async function showEffortsOnMap(efforts, activeSegId, activeEffortId) {
   });
 
   if (efforts.length) {
-    const segLayers = mapLayers.filter(l => l.options && l.options.color === '#fc4c02');
+    const segLayers = mapLayers.filter(l => l.options && effortColors.has(l.options.color));
     if (segLayers.length) {
       const group = L.featureGroup(segLayers);
       if (panMode) map.panTo(group.getBounds().getCenter());
@@ -986,15 +1002,24 @@ async function selectSegment(segId, effortId) {
   clearMapLayers();
   showEffortsOnMap(currentEfforts, segId, effortId);  // passa effortId per evidenziare solo quello
   
-  if (effort && effort.polyline) {
-    try {
-      const coords = decodePolyline(effort.polyline).map(c=>[c[0],c[1]]);
+  if (effort) {
+    let coords = null;
+    if (effort.polyline) {
+      try { coords = decodePolyline(effort.polyline).map(c=>[c[0],c[1]]); } catch(ex){}
+    }
+    if (!coords && effort.start_idx != null && effort.end_idx != null && currentTrack && currentTrack.length > 1) {
+      const sLen = currentStreamLength || effort.total_points || currentTrack.length;
+      const tLen = currentTrack.length;
+      const si = Math.max(0, Math.round(effort.start_idx * (tLen - 1) / (sLen - 1)));
+      const ei = Math.min(tLen - 1, Math.round(effort.end_idx * (tLen - 1) / (sLen - 1)));
+      if (ei > si) coords = currentTrack.slice(si, ei + 1);
+    }
+    if (coords && coords.length >= 2) {
       const hl0 = L.polyline(coords, {color:'#fff', weight:9, opacity:.6}).addTo(map);
       const hl1 = L.polyline(coords, {color:'#ffe000', weight:5, opacity:1}).addTo(map);
       mapLayers.push(hl0, hl1);
-      // In pan mode non muovere la mappa quando si cambia segmento
       if (!panMode) mapFocusLayer(hl0);
-    } catch(ex){}
+    }
   }
 
   // Carica storico del segmento
@@ -1014,24 +1039,22 @@ function _segExtraStats(best, seg) {
   const vamBest = best.vam;
   let wattBest = null;
   try {
-    // Pendenza: preferisci avg_grade_pct dell'effort, poi calcola da elev/dist
     const grade = seg ? (seg.avg_grade_pct || best.avg_grade_pct || 0) : (best.avg_grade_pct || 0);
-    // Solo tratti in salita (pendenza > 0)
-    if (grade > 0) {
+    if (grade > 0 && grade < 35) {
       const m   = +(appSettings.weight_kg||75) + +(appSettings.bike_kg||10);
       const crr = +(appSettings.crr||0.005);
       const cda = +(appSettings.cda||0.35);
       const d   = (seg ? (seg.distance_m||seg.distance) : best.distance_m) || 0;
       const tt   = best.elapsed_seconds || 0;
-      // Dislivello da pendenza × distanza (più affidabile di elev_difference)
       const el  = grade / 100 * d;
       if (d > 0 && tt > 0 && el > 0) {
-        const v = d/tt;
-        const slope = el/d;
+        const v = Math.min(d/tt, 35);
+        const slope = Math.min(el/d, 0.35);
         const fg = m*9.81*Math.sin(Math.atan(slope));
         const fr = m*9.81*Math.cos(Math.atan(slope))*crr;
         const fa = 0.5*1.225*cda*v*v;
-        wattBest = Math.round((fg+fr+fa)*v);
+        const w = Math.round(Math.max(0, Math.min((fg+fr+fa)*v, 2500)));
+        if (w > 0 && w <= 2500) wattBest = w;
       }
     }
   } catch(e) {}
@@ -1186,6 +1209,8 @@ document.getElementById('act-list').addEventListener('click', async e => {
   if (currentActivityId === id) {
     currentActivityId = null;
     currentEfforts = [];
+    currentTrack = null;
+    currentStreamLength = null;
     document.getElementById('right').classList.remove('open');
     setTimeout(() => map && map.invalidateSize({animate:true}), 260);
   }
@@ -1338,6 +1363,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
       if (!confirm(t('confirm.deleteEffort'))) return;
       try {
         await api(`/api/efforts/${effortId}`, {method:'DELETE'});
+        await Promise.all([loadStatus(), loadActivities()]);
         if (currentActivityId) {
           const actId = currentActivityId;
           currentActivityId = null;
