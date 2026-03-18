@@ -1,4 +1,4 @@
-# strava-oss-segmentizer
+# stravish
 
 Open-source GPX segmentizer con rilevamento strava-like.
 
