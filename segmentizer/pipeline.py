@@ -152,16 +152,20 @@ class Segmentizer:
 
 
         # ── Match segmenti storici già in cache ──────────────────────
+        # Usa get_segments_with_efforts_in_bbox per cercare solo tra i segmenti
+        # effettivamente percorsi (che hanno almeno un effort nel DB)
         historical_saved = 0
         try:
             from utils.gpx_utils import gpx_bbox
             matcher_h = SegmentMatcher(self.config)
             bbox = gpx_bbox(points)
             buf  = 0.01
-            cached_segs = self.cache.get_segments_in_bbox(
+            # Solo segmenti con effort esistenti (molto più veloce)
+            cached_segs = self.cache.get_segments_with_efforts_in_bbox(
                 bbox.lat_min-buf, bbox.lat_max+buf, bbox.lng_min-buf, bbox.lng_max+buf
             )
             cached_segs = [s for s in cached_segs if s.polyline and s.source != 'auto']
+            logger.info(f"Match storico: trovati {len(cached_segs)} segmenti candidati (con effort)")
             track_bbox  = (bbox.lat_min, bbox.lat_max, bbox.lng_min, bbox.lng_max, buf)
             import calendar as _cal
             act_epoch_h = None
@@ -175,9 +179,11 @@ class Segmentizer:
                     (activity_id, seg.segment_id)
                 ).fetchone()
                 if existing:
+                    logger.debug(f"Match storico: skip {seg.name} (già presente)")
                     continue
                 result = matcher_h.match_cached_segment(seg, points, track_bbox)
                 if result:
+                    logger.info(f"Match storico: MATCH {seg.name} (frechet={result.frechet_distance_m:.1f}m)")
                     effort = Effort(
                         effort_id=None,
                         activity_id=activity_id,
@@ -198,7 +204,9 @@ class Segmentizer:
                     self.cache.insert_effort(effort)
                     historical_saved += 1
             if historical_saved:
-                logger.info(f"Match storico: {historical_saved}/{len(cached_segs)} segmenti in {filename}")
+                logger.info(f"Match storico: {historical_saved}/{len(cached_segs)} segmenti matchati in {filename}")
+            elif cached_segs:
+                logger.info(f"Match storico: nessun match su {len(cached_segs)} candidati in {filename}")
         except Exception as ex:
             logger.warning(f"Match storico fallito: {ex}")
         # Salva segmenti e effort auto-rilevati (solo non coperti da storici/Strava)

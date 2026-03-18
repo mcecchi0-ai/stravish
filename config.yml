@@ -18,11 +18,12 @@ cache:
 # Algoritmo di matching segmento su traccia GPX
 matching:
   # Raggio (metri) entro cui cercare start/end del segmento sulla traccia
-  proximity_radius_m: 50
+  # Valore alto per gestire drift GPS tra dispositivi diversi
+  proximity_radius_m: 250
   # Fréchet distance massima accettabile (metri) per considerare un match valido
-  max_frechet_distance_m: 50
+  max_frechet_distance_m: 100
   # Fraction minima del segmento che deve essere "coperta" dalla traccia
-  min_coverage_ratio: 0.85
+  min_coverage_ratio: 0.75
 
 # Rilevamento automatico segmenti (attivo se Strava non restituisce risultati)
 auto_detect:

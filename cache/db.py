@@ -391,6 +391,46 @@ class SegmentCache:
         self._conn.execute("DELETE FROM segments WHERE segment_id=?", (segment_id,))
         self._conn.commit()
 
+    def cleanup_orphan_segments(self) -> int:
+        """
+        Rimuove dal DB tutti i segmenti che non hanno effort associati.
+        Ritorna il numero di segmenti eliminati.
+        """
+        # Trova segmenti senza effort
+        orphans = self._conn.execute("""
+            SELECT s.segment_id FROM segments s
+            LEFT JOIN efforts e ON s.segment_id = e.segment_id
+            WHERE e.effort_id IS NULL
+        """).fetchall()
+
+        count = len(orphans)
+        if count > 0:
+            self._conn.execute("""
+                DELETE FROM segments WHERE segment_id IN (
+                    SELECT s.segment_id FROM segments s
+                    LEFT JOIN efforts e ON s.segment_id = e.segment_id
+                    WHERE e.effort_id IS NULL
+                )
+            """)
+            self._conn.commit()
+            logger.info(f"Cleanup: rimossi {count} segmenti orfani")
+        return count
+
+    def get_segments_with_efforts_in_bbox(self, lat_min, lat_max, lng_min, lng_max):
+        """
+        Ritorna solo i segmenti nel bbox che hanno almeno un effort associato.
+        Molto più efficiente per il matching storico.
+        """
+        rows = self._conn.execute("""
+            SELECT DISTINCT s.segment_id, s.name, s.source, s.activity_type,
+                   s.avg_grade, s.distance, s.elev_difference,
+                   s.start_lat, s.start_lng, s.end_lat, s.end_lng, s.polyline
+            FROM segments s
+            INNER JOIN efforts e ON s.segment_id = e.segment_id
+            WHERE s.start_lat BETWEEN ? AND ? AND s.start_lng BETWEEN ? AND ?
+        """, (lat_min, lat_max, lng_min, lng_max)).fetchall()
+        return [self._row_to_segment(r) for r in rows]
+
     def delete_activity(self, activity_id: int):
         """Elimina un'attività e tutti i suoi effort e power bests dal DB."""
         self._conn.execute("DELETE FROM power_bests WHERE activity_id=?", (activity_id,))
@@ -548,8 +588,9 @@ class SegmentCache:
                    WHERE interval_minutes=? AND watts > ?""",
                 (b["interval_minutes"], b["interval_minutes"], b["watts"])
             ).fetchone()
-            rank = row["better_count"] + 1 if row else 1
-            best_watts = row["best_watts"] if row else b["watts"]
+            better_count = (row["better_count"] or 0) if row else 0
+            rank = better_count + 1
+            best_watts = (row["best_watts"] or b["watts"]) if row else b["watts"]
             # Conta totale per quell'intervallo
             total_row = self._conn.execute(
                 "SELECT COUNT(*) as total FROM power_bests WHERE interval_minutes=?",

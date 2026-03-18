@@ -292,6 +292,19 @@ def api_status():
     })
 
 
+@app.route("/api/cleanup-orphan-segments", methods=["POST"])
+def api_cleanup_orphan_segments():
+    """
+    Rimuove dal DB tutti i segmenti che non hanno effort associati.
+    Utile per velocizzare il matching storico.
+    """
+    count = get_cache().cleanup_orphan_segments()
+    return jsonify({
+        "removed": count,
+        "message": f"Rimossi {count} segmenti orfani"
+    })
+
+
 @app.route("/api/activities")
 def api_activities():
     activities = get_cache().get_all_activities()
@@ -902,6 +915,16 @@ def api_activity_notes(activity_id):
     return jsonify({"ok": True})
 
 
+@app.route("/api/activities/<int:activity_id>/rename", methods=["PATCH"])
+def api_activity_rename(activity_id):
+    data = request.get_json(force=True)
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "Nome non valido"}), 400
+    get_cache().update_activity_meta(activity_id, activity_name=name)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/activities/<int:activity_id>/power-bests")
 def api_activity_power_bests(activity_id):
     """
@@ -1081,12 +1104,12 @@ def api_activity_power_bests_ranked(activity_id):
     # Controlla se già salvati
     existing = get_cache().get_power_bests_for_activity(activity_id)
     if not existing:
-        # Non ci sono — prova a calcolarli
-        # Usa la stessa logica dell'endpoint principale
-        with app.test_request_context():
-            resp = api_activity_power_bests(activity_id)
+        # Non ci sono — prova a calcolarli chiamando direttamente l'endpoint
+        # Usa test_client per una chiamata HTTP locale
+        with app.test_client() as client:
+            resp = client.get(f"/api/activities/{activity_id}/power-bests")
             if resp.status_code != 200:
-                return resp
+                return jsonify({"bests": [], "error": "Calcolo power bests fallito"})
 
     # Ora leggi con i rank
     ranked = get_cache().get_power_bests_with_rank(activity_id)

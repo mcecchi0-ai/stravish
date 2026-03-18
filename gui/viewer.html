@@ -43,9 +43,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .act-meta{font-size:11px;color:var(--text2);margin-top:3px}
 .act-seg-count{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px}
 .act-seg-count.strava-count{background:rgba(252,76,2,.18);color:var(--orange)}
-.act-seg-count.auto-count{background:rgba(100,180,100,.18);color:#6ab06a}
+.act-seg-count.auto-count{background:rgba(64,180,224,.18);color:#40b4e0}
 .act-seg-count.no-seg{background:rgba(255,255,255,.06);color:var(--text2)}
-.act-seg-count.hist-count{background:rgba(64,180,224,.18);color:#40b4e0}
+.act-seg-count.hist-count{background:rgba(252,140,66,.18);color:#ff8c42}
 .act-notes-area{width:100%;margin-top:6px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:11px;padding:5px 7px;resize:vertical;min-height:40px;font-family:inherit;line-height:1.4;transition:border-color .15s}
 .act-notes-area:focus{outline:none;border-color:var(--orange)}
 .act-notes-area::placeholder{color:var(--text2)}
@@ -59,16 +59,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .map-toggle{background:var(--surface);border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;transition:all .15s;user-select:none}
 .map-toggle:hover{background:var(--surface2);color:var(--text)}
 .map-toggle.active{background:var(--orange);color:white;border-color:var(--orange)}
-
-  /* STRAVA ACTIVITY ID DIALOG (post-import manuale) */
-  #strava-link-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:3000;align-items:center;justify-content:center}
-  #strava-link-modal.open{display:flex}
-  #strava-link-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:400px;max-width:95vw;padding:24px;display:flex;flex-direction:column;gap:14px}
-  #strava-link-box h3{font-size:15px;font-weight:700}
-  #strava-link-box p{font-size:12px;color:var(--text2);line-height:1.5}
-  #strava-link-id{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;padding:8px 10px;font-family:inherit}
-  #strava-link-id:focus{outline:none;border-color:var(--orange)}
-  #strava-link-footer{display:flex;gap:8px;justify-content:flex-end}
 
   /* STRAVA EFFORT FETCH */
   .strava-fetch-bar{display:flex;gap:5px;margin-top:6px;align-items:center}
@@ -103,10 +93,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   .sync-log-row.error{color:var(--orange)}
   .act-delete{margin-left:6px;opacity:0;cursor:pointer;font-size:11px;transition:opacity .15s;user-select:none}
   .act-refresh{margin-left:6px;opacity:0;cursor:pointer;font-size:11px;transition:opacity .15s;user-select:none}
+  .act-edit{margin-left:6px;opacity:0;cursor:pointer;font-size:11px;transition:opacity .15s;user-select:none}
   .act-item:hover .act-delete{opacity:.5}
   .act-item:hover .act-refresh{opacity:.5}
+  .act-item:hover .act-edit{opacity:.5}
   .act-item:hover .act-delete:hover{opacity:1}
   .act-item:hover .act-refresh:hover{opacity:1}
+  .act-item:hover .act-edit:hover{opacity:1}
   .tree-seg-vam{font-size:10px;font-weight:600;color:var(--orange);background:rgba(252,76,2,.12);border-radius:3px;padding:1px 4px;margin-left:5px}
   #settings-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;align-items:center;justify-content:center}
   #settings-modal.open{display:flex}
@@ -193,6 +186,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .spinner{font-size:24px;animation:spin 1s linear infinite;display:block;margin-bottom:8px}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+/* GLOBAL LOADING OVERLAY */
+#global-loading{display:none;position:fixed;inset:0;background:rgba(15,17,23,.92);z-index:3000;align-items:center;justify-content:center;flex-direction:column;gap:12px}
+#global-loading.active{display:flex}
+#global-loading .spinner{font-size:32px;color:var(--orange)}
+#global-loading .loading-text{font-size:14px;color:var(--text);font-weight:600}
+#global-loading .loading-sub{font-size:12px;color:var(--text2)}
+
 /* STRAVA SYNC MODAL */
 #sync-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;align-items:center;justify-content:center}
 #sync-modal.open{display:flex}
@@ -275,20 +275,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 
 </div>
 
-<!-- STRAVA LINK DIALOG (post-import manuale) -->
-<div id="strava-link-modal">
-  <div id="strava-link-box">
-    <h3 data-i18n="stravaLink.title"></h3>
-    <p data-i18n-html="stravaLink.description"></p>
-    <input id="strava-link-id" type="number" data-i18n-placeholder="stravaLink.placeholder">
-    <div id="strava-link-footer">
-      <button class="btn sec" id="strava-link-skip" data-i18n="btn.skip"></button>
-      <button class="btn" id="strava-link-confirm" data-i18n="stravaLink.importEfforts"></button>
-    </div>
-  </div>
-</div>
-
-
 <div id="settings-modal">
   <div id="settings-box">
     <div id="settings-header">
@@ -338,6 +324,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <button class="btn" id="settings-save" data-i18n="btn.save"></button>
     </div>
   </div>
+</div>
+
+<div id="global-loading">
+  <span class="spinner">⟳</span>
+  <span class="loading-text" data-i18n="import.inProgress"></span>
+  <span class="loading-sub" id="loading-detail"></span>
 </div>
 
 <div id="sync-modal">
@@ -583,10 +575,11 @@ function renderActivities() {
     }
     return `<div class="act-item ${a.activity_id===currentActivityId?'active':''}" data-id="${a.activity_id}">
       <div style="display:flex;align-items:center;gap:4px">
-        <div class="act-name" style="flex:1">${a.filename.replace('.gpx','')}</div>
+        <div class="act-name" style="flex:1">${a.activity_name || a.filename.replace('.gpx','')}</div>
         ${a.effort_count>0 ? `<span class="act-expand ${a.activity_id===currentActivityId?'open':''}" data-expand="${a.activity_id}">▶</span>` : ''}
       </div>
       <div class="act-meta">${date} · ${dist} ${t('unit.km')} · +${ele} ${t('unit.m')}
+        <span class="act-edit" data-id="${a.activity_id}" title="${t('left.editTitle')}">✏️</span>
         <span class="act-refresh" data-id="${a.activity_id}" title="${t('left.refreshTitle')}">🔄</span>
         <span class="act-delete" data-id="${a.activity_id}" title="${t('left.deleteTitle')}">🗑</span>
       </div>
@@ -958,8 +951,8 @@ async function showEffortsOnMap(efforts, activeSegId, activeEffortId) {
     if (!e.polyline) return;
     try {
       const coords = decodePolyline(e.polyline).map(c=>[c[0],c[1]]);
-      const effortColor = e.source==='historical' ? '#40b4e0'
-                        : e.source==='auto'       ? '#6ab06a'
+      const effortColor = e.source==='historical' ? '#ff8c42'
+                        : e.source==='auto'       ? '#40b4e0'
                         : '#fc4c02'; // strava_api
       const isDimmed = activeSegId && e.segment_id !== activeSegId;
       const layer = L.polyline(coords, {color:effortColor, weight:isDimmed?2:3, opacity:isDimmed?.35:.85})
@@ -1188,14 +1181,46 @@ document.getElementById('act-list').addEventListener('click', async e => {
   const name = act ? (act.activity_name || act.filename) : `#${id}`;
   if (!confirm(t('confirm.deleteActivity', {name: name}))) return;
   await api(`/api/activities/${id}`, {method:'DELETE'});
+  // Rimuovi immediatamente dall'array locale per aggiornare subito la UI
+  allActivities = allActivities.filter(a => a.activity_id !== id);
   if (currentActivityId === id) {
     currentActivityId = null;
+    currentEfforts = [];
     document.getElementById('right').classList.remove('open');
     setTimeout(() => map && map.invalidateSize({animate:true}), 260);
   }
   clearMapLayers();
-  await Promise.all([loadStatus(), loadActivities()]);
+  renderActivities();  // Re-render immediato
+  await loadStatus();  // Aggiorna contatori
 }, true); // capture=true per intercettare prima del listener selectActivity
+
+// .act-edit → rinomina attività
+document.getElementById('act-list').addEventListener('click', async e => {
+  const btn = e.target.closest('.act-edit');
+  if (!btn) return;
+  e.stopPropagation();
+  const id = +btn.dataset.id;
+  const act = allActivities.find(a => a.activity_id === id);
+  const currentName = act ? (act.activity_name || act.filename.replace('.gpx','')) : '';
+  const newName = prompt(t('prompt.rename'), currentName);
+  if (newName === null || newName.trim() === '' || newName.trim() === currentName) return;
+  try {
+    await api(`/api/activities/${id}/rename`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: newName.trim()})
+    });
+    // Aggiorna array locale
+    if (act) act.activity_name = newName.trim();
+    renderActivities();
+    // Aggiorna header pannello destro se attività aperta
+    if (currentActivityId === id) {
+      document.getElementById('right-seg-name').textContent = newName.trim();
+    }
+  } catch(err) {
+    alert(t('error.renameFailed', {message: err.message}));
+  }
+}, true);
 
 // .act-refresh → ricalcola aggregati + segmentizzazione (cache-first, poi Strava)
 document.getElementById('act-list').addEventListener('click', async e => {
@@ -1212,8 +1237,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
   fileInput.accept = '.gpx';
   fileInput.onchange = async () => {
     if (!fileInput.files.length) return;
-    const old = btn.textContent;
-    btn.textContent = '⏳';
+    showGlobalLoading(t('refresh.inProgress'), name);
     const fd = new FormData();
     fd.append('gpx', fileInput.files[0]);
     try {
@@ -1236,7 +1260,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
     } catch(err) {
       alert(t('error.refreshFailed', {message: err.message}));
     } finally {
-      btn.textContent = old;
+      hideGlobalLoading();
     }
   };
   fileInput.click();
@@ -1272,12 +1296,23 @@ overlay.addEventListener('drop', e=>{e.preventDefault();dropZone.classList.remov
 
 let _pendingImportResults = [];
 
+function showGlobalLoading(msg, detail) {
+  const el = document.getElementById('global-loading');
+  el.querySelector('.loading-text').textContent = msg || t('import.inProgress');
+  document.getElementById('loading-detail').textContent = detail || '';
+  el.classList.add('active');
+}
+function hideGlobalLoading() {
+  document.getElementById('global-loading').classList.remove('active');
+}
+
 async function importFiles(files) {
   if (!files.length) return;
-  dropZone.style.display='none'; progress.style.display='block';
+  // Nascondi drop zone e mostra overlay globale
+  overlay.style.display='none';
+  showGlobalLoading(t('import.importing', {count: files.length}), t('import.pleaseWait'));
   const fd = new FormData();
   Array.from(files).forEach(f=>fd.append('gpx',f));
-  document.getElementById('import-msg').textContent=t('import.importing', {count: files.length});
   try {
     const resp = await fetch(`${API}/api/import`,{method:'POST',body:fd});
     _pendingImportResults = await resp.json();
@@ -1286,91 +1321,10 @@ async function importFiles(files) {
       alert(errors.map(r=>`❌ ${r.filename}: ${r.error}`).join('\n'));
     }
   } catch(e) { alert(t('error.generic', {message: e.message})); _pendingImportResults=[]; }
-  overlay.style.display='none'; progress.style.display='none'; dropZone.style.display='';
+  hideGlobalLoading();
   await Promise.all([loadStatus(), loadActivities()]);
-  // Se c'è almeno un'attività importata con successo, proponi associazione Strava
-  const ok = _pendingImportResults.filter(r=>!r.error && r.activity_id);
-  for (const r of ok) {
-    await tryAutoMatchStrava(r.activity_id, r.filename);
-  }
   _pendingImportResults = [];
 }
-
-async function tryAutoMatchStrava(activityId, filename) {
-  // Cerca automaticamente l'activity ID Strava per nome file
-  try {
-    const res = await fetch(`${API}/api/strava/match-activity`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({filename})
-    });
-    const data = await res.json();
-    if (data.strava_id) {
-      // Match trovato — fetch effort automatico senza dialog
-      const statusEl = document.getElementById('fs-' + activityId);
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text2)">${t('fetch.matchFound', {name: data.name})}</span>`;
-      const r2 = await fetch(`${API}/api/activities/${activityId}/strava-efforts`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({strava_activity_id: data.strava_id})
-      });
-      const data2 = await r2.json();
-      if (data2.error) throw new Error(data2.error);
-      const act = allActivities.find(a => a.activity_id === activityId);
-      if (act) { act.strava_effort_source = 'strava_api'; act.strava_activity_id = data.strava_id; }
-      await Promise.all([loadStatus(), loadActivities()]);
-      if (currentActivityId === activityId) {
-        const efforts = await api(`/api/activities/${activityId}/efforts`);
-        currentEfforts = efforts;
-        populateTree(activityId, efforts);
-        clearMapLayers(); showEffortsOnMap(efforts);
-      }
-      return; // match automatico riuscito, nessun dialog
-    }
-  } catch(e) {
-    console.warn('Auto-match Strava fallito:', e);
-  }
-  // Nessun match automatico — mostra dialog manuale
-  showStravaLinkDialog(activityId);
-}
-
-function showStravaLinkDialog(activityId) {
-  document.getElementById('strava-link-id').value = '';
-  document.getElementById('strava-link-modal').classList.add('open');
-  document.getElementById('strava-link-modal')._activityId = activityId;
-}
-
-document.getElementById('strava-link-skip').addEventListener('click', () => {
-  document.getElementById('strava-link-modal').classList.remove('open');
-  _pendingImportResults = [];
-});
-
-document.getElementById('strava-link-confirm').addEventListener('click', async () => {
-  const modal = document.getElementById('strava-link-modal');
-  const actId = modal._activityId;
-  const stravaId = document.getElementById('strava-link-id').value.trim();
-  modal.classList.remove('open');
-  if (!stravaId || !actId) { _pendingImportResults=[]; return; }
-  // Usa l'endpoint strava-efforts già esistente
-  const statusEl = document.getElementById('fs-' + actId);
-  try {
-    const res = await fetch(`${API}/api/activities/${actId}/strava-efforts`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({strava_activity_id: +stravaId})
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    // Aggiorna UI
-    const act = allActivities.find(a=>a.activity_id===actId);
-    if (act) { act.strava_effort_source='strava_api'; act.strava_activity_id=+stravaId; }
-    await Promise.all([loadStatus(), loadActivities()]);
-    if (currentActivityId === actId) {
-      const efforts = await api(`/api/activities/${actId}/efforts`);
-      currentEfforts = efforts;
-      populateTree(actId, efforts);
-      clearMapLayers(); showEffortsOnMap(efforts);
-    }
-  } catch(e) { alert(t('error.stravaEffortFetch', {message: e.message})); }
-  _pendingImportResults=[];
-});
 
 // ── EVENT DELEGATION su #act-list (una volta sola) ──────────────
 document.getElementById('act-list').addEventListener('click', async e => {
@@ -1598,29 +1552,6 @@ function decodePolyline(str){
   applyI18n();
   initLanguageSelector();
   await Promise.all([loadStatus(), loadActivities(), loadSettings()]);
-  // Automatch in background — non blocca il rendering
-  setTimeout(async () => {
-    try {
-      const r = await fetch(`${API}/api/strava/automatch`, {method:'POST'});
-      const d = await r.json();
-      if (d.matched > 0) {
-        console.log(`Automatch: ${d.matched} attività agganciate a Strava`);
-        await loadActivities();
-        const freshActs = await api('/api/activities');
-        for (const a of freshActs) {
-          if (a.strava_activity_id && a.strava_effort_source !== 'strava_api') {
-            try {
-              await fetch(`${API}/api/activities/${a.activity_id}/strava-efforts`, {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({strava_activity_id: a.strava_activity_id})
-              });
-            } catch(e) { console.warn(`Effort fetch fallito per ${a.filename}:`, e); }
-          }
-        }
-        await Promise.all([loadStatus(), loadActivities()]);
-      }
-    } catch(e) { /* silenzioso se non autenticato */ }
-  }, 500);
 })();
 </script>
 </body>
