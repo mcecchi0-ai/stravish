@@ -188,6 +188,16 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   .medal-name:hover{color:var(--orange)}
   .medal-time{font-size:12px;font-weight:700;color:var(--text);white-space:nowrap}
   .medal-total{font-size:10px;color:var(--text2);white-space:nowrap}
+  /* Power bests section */
+  .power-bests-section{padding:10px 14px 14px}
+  .power-bests-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+  .power-best-item{background:var(--surface2);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+  .power-best-interval{font-size:10px;color:var(--text2);font-weight:600}
+  .power-best-value{font-size:16px;font-weight:700;color:var(--orange)}
+  .power-best-range{font-size:9px;color:var(--text2)}
+  .power-best-rank{font-size:9px;color:var(--text2);font-weight:600}
+  .power-best-item.power-best-pr{background:linear-gradient(135deg,rgba(255,215,0,.15),rgba(252,76,2,.12));border:1px solid rgba(255,215,0,.3)}
+  .power-best-item.power-best-pr .power-best-value{color:var(--gold)}
   .cur-act-row{background:rgba(252,76,2,.12)!important}
   .cur-act-row td{border-top:1px solid rgba(252,76,2,.25)!important;border-bottom:1px solid rgba(252,76,2,.25)!important}
 .efforts-table td{padding:7px 6px;border-bottom:1px solid var(--border);vertical-align:middle}
@@ -383,7 +393,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 const API = '';
 let map, panMode = true;
 let allActivities = [], currentActivityId = null, currentEfforts = [];
-let activeSegmentId = null, speedChart = null;
+let activeSegmentId = null, activeEffortId = null, speedChart = null;
 let mapLayers = [];
 
 // ── MAP ───────────────────────────────────────────────────────────
@@ -732,6 +742,7 @@ async function selectActivity(id) {
   if (currentActivityId === id) {
     currentActivityId = null;
     activeSegmentId = null;
+    activeEffortId = null;
     currentEfforts = [];
     document.getElementById('right').classList.remove('open');
     renderActivities();
@@ -740,6 +751,7 @@ async function selectActivity(id) {
   }
   currentActivityId = id;
   activeSegmentId = null;
+  activeEffortId = null;
   document.getElementById('right').classList.remove('open');
   clearMapLayers();
 
@@ -757,17 +769,19 @@ async function showActivitySummary(id) {
   document.getElementById('right-body').innerHTML = '<div style="padding:24px;text-align:center;color:var(--text2)">Caricamento…</div>';
   document.getElementById('right').classList.add('open');
   try {
-    const [s, medals] = await Promise.all([
+    const [s, medals, powerBests] = await Promise.all([
       api(`/api/activities/${id}/summary`),
-      api(`/api/activities/${id}/medals`).catch(() => [])
+      api(`/api/activities/${id}/medals`).catch(() => []),
+      api(`/api/activities/${id}/power-bests-ranked`).catch(() => ({ bests: [] }))
     ]);
-    renderActivitySummary(s, medals);
+    renderActivitySummary(s, medals, powerBests.bests || []);
   } catch(e) {
     document.getElementById('right-body').innerHTML = `<div style="padding:16px;color:var(--orange)">Errore: ${e.message}</div>`;
   }
 }
 
-function renderActivitySummary(s, medals) {
+function renderActivitySummary(s, medals, powerBests) {
+  powerBests = powerBests || [];
   const fmt = v => v != null ? Math.round(v) : null;
   const fmtTime = secs => {
     if (!secs) return null;
@@ -864,6 +878,33 @@ function renderActivitySummary(s, medals) {
         </div>`).join('')}
     </div>` : '';
 
+  // Sezione Power Bests (picchi di potenza stimata su intervalli) con rank e medaglie
+  const POWER_MEDAL_ICONS = ['🥇','🥈','🥉'];
+  const powerBestsHtml = (powerBests && powerBests.length) ? `
+    <div class="power-bests-section">
+      <div class="section-title" style="padding:0 0 6px">⚡ Record di potenza (stimata)</div>
+      <div class="power-bests-grid">
+        ${powerBests.map(pb => {
+          const medalIcon = pb.rank <= 3 ? POWER_MEDAL_ICONS[pb.rank-1] : '';
+          const isPR = pb.is_pr || pb.rank === 1;
+          const rankClass = isPR ? 'power-best-pr' : '';
+          const rankText = pb.total > 1 ? `#${pb.rank}/${pb.total}` : '';
+          return `
+          <div class="power-best-item ${rankClass}">
+            <div style="display:flex;align-items:center;gap:4px">
+              <span class="power-best-interval">${pb.interval_min} min</span>
+              ${medalIcon ? `<span style="font-size:14px">${medalIcon}</span>` : ''}
+            </div>
+            <span class="power-best-value">${pb.watts} W</span>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span class="power-best-range">${pb.start_fmt} → ${pb.end_fmt}</span>
+              ${rankText ? `<span class="power-best-rank">${rankText}</span>` : ''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : '';
+
   const notesHtml = `
     <div style="padding:10px 14px 14px">
       <div class="section-title" style="padding:0 0 6px">Note</div>
@@ -875,6 +916,7 @@ function renderActivitySummary(s, medals) {
   document.getElementById('right-body').innerHTML = `
     <div style="padding:10px 14px 6px;font-size:11px;color:var(--text2)">${date} · ${effortBadge}</div>
     ${statsHtml}
+    ${powerBestsHtml}
     ${medalsHtml}
     ${notesHtml}`;
 
@@ -898,7 +940,8 @@ function populateTree(actId, efforts) {
     const grade = e.avg_grade_pct
       ? (e.avg_grade_pct>0?'+':'')+e.avg_grade_pct.toFixed(1)+'%' : '';
     const vamTag = '';
-    return `<div class="tree-seg ${e.segment_id===activeSegmentId?'active':''}" data-id="${e.segment_id}">
+    // Usa effort_id come chiave univoca, data-seg-id per lo storico
+    return `<div class="tree-seg ${e.effort_id===activeEffortId?'active':''}" data-effort-id="${e.effort_id}" data-seg-id="${e.segment_id}">
       <div class="tree-seg-num">${i+1}</div>
       <div class="tree-seg-body">
         <div class="tree-seg-name">${e.name}</div>
@@ -912,7 +955,7 @@ function populateTree(actId, efforts) {
   // I click sui .tree-seg sono gestiti via event delegation su #act-list
 }
 
-async function showEffortsOnMap(efforts, activeSegId) {
+async function showEffortsOnMap(efforts, activeSegId, activeEffortId) {
   // 1. Tracciato GPX completo in grigio (sfondo)
   if (currentActivityId) {
     try {
@@ -984,7 +1027,7 @@ async function showEffortsOnMap(efforts, activeSegId) {
       const isDimmed = activeSegId && e.segment_id !== activeSegId;
       const layer = L.polyline(coords, {color:effortColor, weight:isDimmed?2:3, opacity:isDimmed?.35:.85})
         .addTo(map).bindTooltip(e.name, {sticky:true});
-      layer.on('click', () => selectSegment(e.segment_id));
+      layer.on('click', () => selectSegment(e.segment_id, e.effort_id));
       mapLayers.push(layer);
     } catch(ex){}
   });
@@ -1000,37 +1043,37 @@ async function showEffortsOnMap(efforts, activeSegId) {
 }
 
 // ── SEGMENT DETAIL ────────────────────────────────────────────────
-async function selectSegment(segId) {
+async function selectSegment(segId, effortId) {
   activeSegmentId = segId;
+  activeEffortId = effortId;
 
-  // Evidenzia riga tree attiva
+  // Evidenzia riga tree attiva usando effort_id
   document.querySelectorAll('.tree-seg').forEach(c =>
-    c.classList.toggle('active', +c.dataset.id===segId));
+    c.classList.toggle('active', +c.dataset.effortId === effortId));
 
-  // Evidenzia layer sulla mappa
-  const effort = currentEfforts.find(e => e.segment_id===segId);
+  // Evidenzia layer sulla mappa - trova l'effort specifico
+  const effort = currentEfforts.find(e => e.effort_id === effortId);
   clearMapLayers();
-  showEffortsOnMap(currentEfforts, segId);  // passa segId per attenuare gli altri
+  showEffortsOnMap(currentEfforts, segId, effortId);  // passa effortId per evidenziare solo quello
+  
   if (effort && effort.polyline) {
     try {
       const coords = decodePolyline(effort.polyline).map(c=>[c[0],c[1]]);
-      // Alone bianco sotto
       const hl0 = L.polyline(coords, {color:'#fff', weight:9, opacity:.6}).addTo(map);
-      // Bordo giallo acceso sopra
       const hl1 = L.polyline(coords, {color:'#ffe000', weight:5, opacity:1}).addTo(map);
       mapLayers.push(hl0, hl1);
       mapFocusLayer(hl0);
     } catch(ex){}
   }
 
-  // Carica storico
+  // Carica storico del segmento
   document.getElementById('right-seg-name').textContent = effort ? effort.name : '—';
   document.getElementById('right-body').innerHTML = '<div style="padding:24px;text-align:center;color:var(--text2)">Caricamento…</div>';
   document.getElementById('right').classList.add('open');
 
   try {
     const history = await api(`/api/segments/${segId}/efforts`);
-    renderSegmentHistory(effort, history);
+    renderSegmentHistory(effort, history, effortId);  // passa effortId per evidenziare nella tabella
   } catch(e) {
     document.getElementById('right-body').innerHTML = `<div style="padding:16px;color:var(--orange)">Errore: ${e.message}</div>`;
   }
@@ -1068,7 +1111,7 @@ function _segExtraStats(best, seg) {
   return '<div class="seg-stats-bar" style="grid-template-columns:repeat('+cells.length+',1fr)">'+cells.join('')+'</div>';
 }
 
-function renderSegmentHistory(seg, efforts) {
+function renderSegmentHistory(seg, efforts, activeEffortId) {
   if (!efforts.length) {
     document.getElementById('right-body').innerHTML =
       '<div style="padding:24px;text-align:center;color:var(--text2)">Nessun effort storico.</div>';
@@ -1105,8 +1148,8 @@ function renderSegmentHistory(seg, efforts) {
           ? `<td>${Math.round(e.average_heartrate)}</td>`
           : '<td style="color:var(--text2)">—</td>';
         const vamTd = e.vam ? `<td style="color:var(--orange);font-size:11px">▲${e.vam}</td>` : '<td style="color:var(--text2)">—</td>';
-        const isCurrent = e.activity_id === currentActivityId;
-        return `<tr class="${isCurrent?'cur-act-row':''}" data-aid="${e.activity_id}">
+        const isCurrent = e.effort_id === activeEffortId;
+        return `<tr class="${isCurrent?'cur-act-row':''}" data-eid="${e.effort_id}">
           <td><span class="rank-badge ${rc}">${e.rank}</span></td>
           <td style="font-size:11px;color:var(--text2)">${date}</td>
           <td style="font-weight:600">${formatTime(e.elapsed_seconds)}</td>
@@ -1264,6 +1307,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
 document.getElementById('right-close').addEventListener('click', () => {
   document.getElementById('right').classList.remove('open');
   activeSegmentId = null;
+  activeEffortId = null;
   currentActivityId = null;
   document.querySelectorAll('.tree-seg').forEach(c=>c.classList.remove('active'));
   document.querySelectorAll('.act-item').forEach(c=>c.classList.remove('active'));
@@ -1330,8 +1374,8 @@ async function tryAutoMatchStrava(activityId, filename) {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({strava_activity_id: data.strava_id})
       });
-      const d2 = await r2.json();
-      if (d2.error) throw new Error(d2.error);
+      const data2 = await r2.json();
+      if (data2.error) throw new Error(data2.error);
       const act = allActivities.find(a => a.activity_id === activityId);
       if (act) { act.strava_effort_source = 'strava_api'; act.strava_activity_id = data.strava_id; }
       await Promise.all([loadStatus(), loadActivities()]);
@@ -1404,17 +1448,17 @@ document.getElementById('act-list').addEventListener('click', async e => {
         await api(`/api/efforts/${effortId}`, {method:'DELETE'});
         if (currentActivityId) {
           const actId = currentActivityId;
-          const activeSeg = activeSegmentId;
           currentActivityId = null;
+          activeEffortId = null;
           await selectActivity(actId);
-          if (activeSeg) await selectSegment(activeSeg);
         }
       } catch (err) {
         alert("Errore durante l'eliminazione: " + err.message);
       }
       return;
     }
-    selectSegment(+treeSeg.dataset.id);
+    // Passa sia segment_id che effort_id
+    selectSegment(+treeSeg.dataset.segId, +treeSeg.dataset.effortId);
     return;
   }
   // .act-expand → toggle tree

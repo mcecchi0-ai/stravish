@@ -902,6 +902,247 @@ def api_activity_notes(activity_id):
     return jsonify({"ok": True})
 
 
+@app.route("/api/activities/<int:activity_id>/power-bests")
+def api_activity_power_bests(activity_id):
+    """
+    Calcola i picchi di potenza media su intervalli predefiniti (sliding window).
+    Funziona solo con GPX locale (non import da Strava senza GPX).
+
+    Intervalli: 5, 10, 15, 20, 25, 30, 40, 45, 55, 60 minuti.
+    Per ogni intervallo restituisce:
+      - watts: potenza media massima
+      - start_s: secondo di inizio della finestra
+      - end_s: secondo di fine della finestra
+    """
+    import math
+
+    row = get_cache()._conn.execute(
+        "SELECT gpx_path FROM activities WHERE activity_id=?", (activity_id,)
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "Attività non trovata"}), 404
+
+    gpx_path = row["gpx_path"]
+    if not gpx_path or not Path(gpx_path).exists():
+        return jsonify({"error": "GPX non disponibile", "bests": []})
+
+    # Leggi impostazioni utente per il modello fisico
+    settings = get_cache().get_all_settings()
+    m_rider = float(settings.get("weight_kg", 75))
+    m_bike  = float(settings.get("bike_kg", 10))
+    crr     = float(settings.get("crr", 0.005))
+    cda     = float(settings.get("cda", 0.32))
+    m_tot   = m_rider + m_bike
+    g       = 9.81
+    rho     = 1.225
+
+    # Parsing GPX
+    try:
+        from utils.gpx_utils import parse_gpx_points, compute_distances
+        points = parse_gpx_points(gpx_path)
+        if len(points) < 10:
+            return jsonify({"error": "GPX troppo corto", "bests": []})
+        points = compute_distances(points)
+    except Exception as ex:
+        logger.warning(f"Parsing GPX fallito per power-bests: {ex}")
+        return jsonify({"error": str(ex), "bests": []})
+
+    # Calcola timestamp in secondi dall'inizio
+    t0 = points[0]["time"]
+    if t0 is None:
+        return jsonify({"error": "GPX senza timestamp", "bests": []})
+
+    for p in points:
+        if p["time"]:
+            p["t_s"] = (p["time"] - t0).total_seconds()
+        else:
+            p["t_s"] = None
+
+    # Rimuovi punti senza timestamp
+    points = [p for p in points if p["t_s"] is not None]
+    if len(points) < 10:
+        return jsonify({"error": "GPX con pochi punti validi", "bests": []})
+
+    # Calcola potenza istantanea per ogni segmento tra punti consecutivi
+    # P = (F_grav + F_roll + F_aero) * v
+    power_segments = []  # lista di {t_start, t_end, watts, dt}
+
+    for i in range(1, len(points)):
+        p0, p1 = points[i-1], points[i]
+        dt = p1["t_s"] - p0["t_s"]
+        if dt <= 0:
+            continue
+
+        dd = p1["dist_from_start_m"] - p0["dist_from_start_m"]
+        de = p1["ele"] - p0["ele"]
+
+        if dd <= 0:
+            continue
+
+        v = dd / dt  # m/s
+        slope = de / dd if dd > 0 else 0
+
+        # Forze
+        f_grav = m_tot * g * math.sin(math.atan(slope))
+        f_roll = m_tot * g * math.cos(math.atan(slope)) * crr
+        f_aero = 0.5 * rho * cda * v * v
+
+        # Potenza (può essere negativa in discesa)
+        p_inst = (f_grav + f_roll + f_aero) * v
+
+        power_segments.append({
+            "t_start": p0["t_s"],
+            "t_end": p1["t_s"],
+            "watts": p_inst,
+            "dt": dt,
+        })
+
+    if not power_segments:
+        return jsonify({"error": "Nessun segmento valido", "bests": []})
+
+    # Intervalli in secondi
+    intervals_min = [5, 10, 15, 20, 25, 30, 40, 45, 55, 60]
+    intervals_s = [m * 60 for m in intervals_min]
+
+    total_duration = power_segments[-1]["t_end"]
+    bests = []
+
+    for interval_s, interval_min in zip(intervals_s, intervals_min):
+        if total_duration < interval_s:
+            # Durata totale insufficiente per questo intervallo
+            continue
+
+        # Sliding window: trova la finestra con potenza media massima
+        best_watts = None
+        best_start = 0
+        best_end = 0
+
+        # Scorri con step di ~1 secondo (o un segmento)
+        window_start = 0.0
+        step = max(1.0, interval_s / 300)  # step adattivo
+
+        while window_start + interval_s <= total_duration:
+            window_end = window_start + interval_s
+
+            # Calcola potenza media nella finestra
+            total_energy = 0.0
+            total_time = 0.0
+
+            for seg in power_segments:
+                # Intersezione tra segmento e finestra
+                seg_start = max(seg["t_start"], window_start)
+                seg_end = min(seg["t_end"], window_end)
+
+                if seg_end > seg_start:
+                    dt_in_window = seg_end - seg_start
+                    total_energy += seg["watts"] * dt_in_window
+                    total_time += dt_in_window
+
+            if total_time > 0:
+                avg_watts = total_energy / total_time
+
+                if best_watts is None or avg_watts > best_watts:
+                    best_watts = avg_watts
+                    best_start = window_start
+                    best_end = window_end
+
+            window_start += step
+
+        if best_watts is not None and best_watts > 0:
+            # Formatta tempi in mm:ss
+            def fmt_time(s):
+                m = int(s) // 60
+                sec = int(s) % 60
+                return f"{m}m{sec:02d}s"
+
+            bests.append({
+                "interval_min": interval_min,
+                "interval_minutes": interval_min,  # alias per compatibilità DB
+                "watts": round(best_watts),
+                "start_s": round(best_start),
+                "end_s": round(best_end),
+                "start_fmt": fmt_time(best_start),
+                "end_fmt": fmt_time(best_end),
+            })
+
+    # Salva i power bests nel database per storicizzazione e ranking
+    if bests:
+        get_cache().save_power_bests(activity_id, bests)
+
+    return jsonify({"bests": bests})
+
+
+@app.route("/api/activities/<int:activity_id>/power-bests-ranked")
+def api_activity_power_bests_ranked(activity_id):
+    """
+    Restituisce i power bests di un'attività con rank rispetto a tutte le altre attività.
+    Se non esistono nel DB, prima li calcola chiamando l'endpoint principale.
+    """
+    # Controlla se già salvati
+    existing = get_cache().get_power_bests_for_activity(activity_id)
+    if not existing:
+        # Non ci sono — prova a calcolarli
+        # Usa la stessa logica dell'endpoint principale
+        with app.test_request_context():
+            resp = api_activity_power_bests(activity_id)
+            if resp.status_code != 200:
+                return resp
+
+    # Ora leggi con i rank
+    ranked = get_cache().get_power_bests_with_rank(activity_id)
+
+    # Aggiungi formattazione tempi
+    for r in ranked:
+        def fmt_time(s):
+            m = int(s) // 60
+            sec = int(s) % 60
+            return f"{m}m{sec:02d}s"
+        r["start_fmt"] = fmt_time(r["start_s"])
+        r["end_fmt"] = fmt_time(r["end_s"])
+        r["interval_min"] = r["interval_minutes"]
+
+    return jsonify({"bests": ranked})
+
+
+@app.route("/api/power-bests/rankings")
+def api_power_bests_rankings():
+    """
+    Restituisce la classifica globale dei power bests per tutti gli intervalli.
+    Opzionale: ?interval=N per filtrare un singolo intervallo.
+    """
+    interval = request.args.get("interval", type=int)
+    all_bests = get_cache().get_power_bests_rankings(interval)
+
+    # Raggruppa per intervallo e assegna rank
+    from collections import defaultdict
+    by_interval = defaultdict(list)
+    for b in all_bests:
+        by_interval[b["interval_minutes"]].append(b)
+
+    result = {}
+    for interval_min, bests in by_interval.items():
+        # Già ordinati per watts DESC dal DB
+        ranked = []
+        for i, b in enumerate(bests, 1):
+            def fmt_time(s):
+                m = int(s) // 60
+                sec = int(s) % 60
+                return f"{m}m{sec:02d}s"
+            ranked.append({
+                "rank": i,
+                "watts": b["watts"],
+                "activity_id": b["activity_id"],
+                "activity_name": b.get("activity_name") or b.get("filename", ""),
+                "activity_date": b.get("activity_date"),
+                "start_fmt": fmt_time(b["start_s"]),
+                "end_fmt": fmt_time(b["end_s"]),
+                "is_pr": i == 1,
+            })
+        result[str(interval_min)] = ranked
+
+    return jsonify(result)
+
+
 @app.route("/api/strava/activities")
 def api_strava_activities():
     """

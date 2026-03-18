@@ -57,6 +57,18 @@ class Effort:
     average_heartrate: Optional[float] = None
 
 
+@dataclass
+class PowerBest:
+    """Record di potenza media massima su un intervallo."""
+    power_best_id: Optional[int]
+    activity_id: int
+    interval_minutes: int
+    watts: float
+    start_s: float          # secondi dall'inizio attività
+    end_s: float
+    activity_date: Optional[str] = None  # per ranking cross-activity
+
+
 class SegmentCache:
 
     SCHEMA = """
@@ -147,6 +159,22 @@ class SegmentCache:
         ("activities", "sigma_cadence",           "REAL DEFAULT NULL"),
     ]
 
+    # Schema tabella power_bests (creata separatamente per retrocompatibilità)
+    POWER_BESTS_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS power_bests (
+        power_best_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+        activity_id       INTEGER NOT NULL REFERENCES activities(activity_id),
+        interval_minutes  INTEGER NOT NULL,
+        watts             REAL NOT NULL,
+        start_s           REAL NOT NULL,
+        end_s             REAL NOT NULL,
+        created_at        TEXT DEFAULT (datetime('now')),
+        UNIQUE(activity_id, interval_minutes)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pb_interval ON power_bests(interval_minutes);
+    CREATE INDEX IF NOT EXISTS idx_pb_watts ON power_bests(interval_minutes, watts DESC);
+    """
+
     def __init__(self, db_path: str):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -165,6 +193,8 @@ class SegmentCache:
                 value TEXT NOT NULL
             );
         """)
+        # Tabella power_bests (aggiunta v3)
+        self._conn.executescript(self.POWER_BESTS_SCHEMA)
         # Migrazione incrementale: aggiunge colonne mancanti senza perdere dati
         for table, col, typedef in self._MIGRATIONS:
             existing = {r[1] for r in self._conn.execute(
@@ -362,7 +392,8 @@ class SegmentCache:
         self._conn.commit()
 
     def delete_activity(self, activity_id: int):
-        """Elimina un'attività e tutti i suoi effort dal DB."""
+        """Elimina un'attività e tutti i suoi effort e power bests dal DB."""
+        self._conn.execute("DELETE FROM power_bests WHERE activity_id=?", (activity_id,))
         self._conn.execute("DELETE FROM efforts WHERE activity_id=?", (activity_id,))
         self._conn.execute("DELETE FROM activities WHERE activity_id=?", (activity_id,))
         self._conn.commit()
@@ -451,3 +482,97 @@ class SegmentCache:
     def _row_to_segment(row):
         fields = set(CachedSegment.__dataclass_fields__)
         return CachedSegment(**{k: v for k, v in dict(row).items() if k in fields})
+
+    # --- Power Bests ---
+
+    def save_power_bests(self, activity_id: int, bests: list):
+        """
+        Salva i power bests per un'attività.
+        bests: lista di dict con {interval_minutes, watts, start_s, end_s}
+        Sovrascrive eventuali valori esistenti per la stessa attività.
+        """
+        # Elimina eventuali bests precedenti per questa attività
+        self._conn.execute(
+            "DELETE FROM power_bests WHERE activity_id=?", (activity_id,)
+        )
+        for b in bests:
+            self._conn.execute(
+                """INSERT INTO power_bests
+                   (activity_id, interval_minutes, watts, start_s, end_s)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (activity_id, b["interval_minutes"], b["watts"],
+                 b["start_s"], b["end_s"])
+            )
+        self._conn.commit()
+
+    def get_power_bests_for_activity(self, activity_id: int):
+        """Restituisce i power bests salvati per un'attività."""
+        rows = self._conn.execute(
+            """SELECT * FROM power_bests
+               WHERE activity_id=?
+               ORDER BY interval_minutes ASC""",
+            (activity_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_power_bests_rankings(self, interval_minutes: int = None):
+        """
+        Restituisce la classifica dei power bests per ogni intervallo.
+        Se interval_minutes è specificato, filtra solo quell'intervallo.
+        """
+        where = "WHERE pb.interval_minutes=?" if interval_minutes else ""
+        params = (interval_minutes,) if interval_minutes else ()
+        rows = self._conn.execute(
+            f"""SELECT pb.*, a.filename, a.activity_date, a.activity_name
+               FROM power_bests pb
+               JOIN activities a ON a.activity_id = pb.activity_id
+               {where}
+               ORDER BY pb.interval_minutes ASC, pb.watts DESC""",
+            params
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_power_bests_with_rank(self, activity_id: int):
+        """
+        Restituisce i power bests di un'attività con il rank rispetto a tutte le altre.
+        """
+        # Prima ottieni i bests dell'attività
+        bests = self.get_power_bests_for_activity(activity_id)
+        result = []
+        for b in bests:
+            # Conta quanti sono migliori (più watt) per lo stesso intervallo
+            row = self._conn.execute(
+                """SELECT COUNT(*) as better_count,
+                          (SELECT MAX(watts) FROM power_bests WHERE interval_minutes=?) as best_watts
+                   FROM power_bests
+                   WHERE interval_minutes=? AND watts > ?""",
+                (b["interval_minutes"], b["interval_minutes"], b["watts"])
+            ).fetchone()
+            rank = row["better_count"] + 1 if row else 1
+            best_watts = row["best_watts"] if row else b["watts"]
+            # Conta totale per quell'intervallo
+            total_row = self._conn.execute(
+                "SELECT COUNT(*) as total FROM power_bests WHERE interval_minutes=?",
+                (b["interval_minutes"],)
+            ).fetchone()
+            total = total_row["total"] if total_row else 1
+            result.append({
+                **b,
+                "rank": rank,
+                "total": total,
+                "best_watts": best_watts,
+                "is_pr": rank == 1
+            })
+        return result
+
+    def delete_power_bests_for_activity(self, activity_id: int):
+        """Elimina i power bests di un'attività."""
+        self._conn.execute(
+            "DELETE FROM power_bests WHERE activity_id=?", (activity_id,)
+        )
+        self._conn.commit()
+
+    def delete_effort(self, effort_id: int):
+        """Elimina un singolo effort dal DB."""
+        self._conn.execute("DELETE FROM efforts WHERE effort_id=?", (effort_id,))
+        self._conn.commit()
