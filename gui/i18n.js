@@ -567,6 +567,68 @@ const I18N = {
       en: 'Overlay timeout (seconds, 0 = disabled)'
     },
 
+    // ─── STRAVA AUTH ────────────────────────────────────────────
+    'settings.stravaApi': {
+      it: 'Strava API',
+      en: 'Strava API'
+    },
+    'settings.stravaClientId': {
+      it: 'Client ID',
+      en: 'Client ID'
+    },
+    'settings.stravaClientSecret': {
+      it: 'Client Secret',
+      en: 'Client Secret'
+    },
+    'strava.authConnected': {
+      it: '🟢 Connesso',
+      en: '🟢 Connected'
+    },
+    'strava.authExpiring': {
+      it: '🟡 In scadenza',
+      en: '🟡 Expiring'
+    },
+    'strava.authExpired': {
+      it: '🔴 Scaduto',
+      en: '🔴 Expired'
+    },
+    'strava.authNone': {
+      it: '🔴 Non autenticato',
+      en: '🔴 Not authenticated'
+    },
+    'strava.expiresIn': {
+      it: 'Scade tra {time}',
+      en: 'Expires in {time}'
+    },
+    'strava.refreshToken': {
+      it: '🔄 Refresh token',
+      en: '🔄 Refresh token'
+    },
+    'strava.refreshing': {
+      it: '⟳ Refresh…',
+      en: '⟳ Refreshing…'
+    },
+    'strava.refreshOk': {
+      it: '✓ Token rinnovato',
+      en: '✓ Token refreshed'
+    },
+    'strava.refreshFailed': {
+      it: '⚠ Refresh fallito: {error}',
+      en: '⚠ Refresh failed: {error}'
+    },
+    'strava.credentialsSaved': {
+      it: '✓ Credenziali salvate',
+      en: '✓ Credentials saved'
+    },
+    'strava.credentialsFailed': {
+      it: '⚠ Salvataggio fallito: {error}',
+      en: '⚠ Save failed: {error}'
+    },
+    'strava.loginHint': {
+      it: 'Esegui <code>python run.py auth login</code> per autorizzare',
+      en: 'Run <code>python run.py auth login</code> to authorize'
+    },
+
     // ─── MISC ───────────────────────────────────────────────────
     'misc.on': {
       it: 'su',

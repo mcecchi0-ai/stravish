@@ -35,13 +35,13 @@ def _idx_overlap_ratio(a_start, a_end, b_start, b_end):
 
 class Segmentizer:
 
-    def __init__(self, config_path=None, config=None):
+    def __init__(self, config_path=None, config=None, cache=None):
         if config is not None:
             self.config = config
         else:
             with open(config_path or "config.yml") as f:
                 self.config = yaml.safe_load(f)
-        self.cache = SegmentCache(self.config["cache"]["db_path"])
+        self.cache = cache or SegmentCache(self.config["cache"]["db_path"])
 
     def process(self, gpx_path, activity_type="cycling",
                 filename_override=None, strava_activity_id=None):

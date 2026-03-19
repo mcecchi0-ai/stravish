@@ -313,6 +313,7 @@ def api_cleanup_orphan_segments():
 def api_activities():
     activities = get_cache().get_all_activities()
     for a in activities:
+        a.pop("gpx_points", None)
         aid = a["activity_id"]
         effective = _get_effective_efforts_for_activity(aid)
         a["effort_count"] = len(effective)
@@ -412,6 +413,71 @@ def api_rate_limit():
         return jsonify({"rules": rules})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/strava/auth-status")
+def api_strava_auth_status():
+    """Restituisce lo stato dell'autenticazione Strava (token presente/scaduto/valido)."""
+    try:
+        strava_cfg = _config.get("strava", {})
+        auth = StravaAuth(strava_cfg.get("client_id", ""), strava_cfg.get("client_secret", ""))
+        status = auth.status()
+        status["has_client_id"] = bool(strava_cfg.get("client_id", ""))
+        status["has_client_secret"] = bool(strava_cfg.get("client_secret", ""))
+        status["client_id"] = strava_cfg.get("client_id", "")
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/strava/auth-refresh", methods=["POST"])
+def api_strava_auth_refresh():
+    """Forza il refresh esplicito del token OAuth Strava."""
+    try:
+        strava_cfg = _config.get("strava", {})
+        auth = StravaAuth(strava_cfg.get("client_id", ""), strava_cfg.get("client_secret", ""))
+        result = auth.force_refresh()
+        if result.get("ok"):
+            # Aggiorna anche l'access_token in-memory nella config
+            tokens = auth._load_tokens()
+            if tokens:
+                _config["strava"]["access_token"] = tokens["access_token"]
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/strava/auth-config", methods=["POST"])
+def api_strava_auth_config():
+    """Salva client_id e client_secret nel config.yml e aggiorna la config in-memory."""
+    try:
+        data = request.get_json(force=True)
+        new_id = str(data.get("client_id", "")).strip()
+        new_secret = str(data.get("client_secret", "")).strip()
+        if not new_id or not new_secret:
+            return jsonify({"ok": False, "error": "client_id e client_secret sono obbligatori"}), 400
+
+        # Aggiorna config in-memory
+        _config["strava"]["client_id"] = new_id
+        _config["strava"]["client_secret"] = new_secret
+
+        # Persisti su config.yml
+        config_path = _ROOT / "config.yml"
+        if config_path.exists():
+            full_config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        else:
+            full_config = {}
+        if "strava" not in full_config:
+            full_config["strava"] = {}
+        full_config["strava"]["client_id"] = new_id
+        full_config["strava"]["client_secret"] = new_secret
+        config_path.write_text(yaml.dump(full_config, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/api/settings", methods=["GET"])
@@ -596,11 +662,12 @@ def api_refresh_activity(activity_id):
             "error": "GPX sorgente non disponibile per refresh. Allega il file GPX dell'attività."
         }), 400
 
-    # Reset effort esistenti per ricalcolo pulito
+    # Reset effort e power bests esistenti per ricalcolo pulito
     get_cache().delete_efforts_for_activity(activity_id)
+    get_cache().delete_power_bests_for_activity(activity_id)
 
     try:
-        seg = Segmentizer(config=_config)
+        seg = Segmentizer(config=_config, cache=get_cache())
         r = seg.process(
             gpx_path,
             activity_type=activity_type,
@@ -938,7 +1005,7 @@ def api_activity_power_bests(activity_id):
     Calcola i picchi di potenza media su intervalli predefiniti (sliding window).
     Funziona solo con GPX locale (non import da Strava senza GPX).
 
-    Intervalli: 5, 10, 15, 20, 25, 30, 40, 45, 55, 60 minuti.
+    Intervalli: 1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 45, 55, 60 minuti.
     Per ogni intervallo restituisce:
       - watts: potenza media massima
       - start_s: secondo di inizio della finestra
@@ -947,7 +1014,7 @@ def api_activity_power_bests(activity_id):
     import math
 
     row = get_cache()._conn.execute(
-        "SELECT gpx_path FROM activities WHERE activity_id=?", (activity_id,)
+        "SELECT gpx_path, moving_time_s, total_distance_m FROM activities WHERE activity_id=?", (activity_id,)
     ).fetchone()
     if not row:
         return jsonify({"error": "Attività non trovata"}), 404
@@ -955,6 +1022,9 @@ def api_activity_power_bests(activity_id):
     gpx_path = row["gpx_path"]
     if not gpx_path or not Path(gpx_path).exists():
         return jsonify({"error": "GPX non disponibile", "bests": []})
+
+    db_moving_s = row["moving_time_s"] or 0
+    db_distance = row["total_distance_m"] or 0
 
     # Leggi impostazioni utente per il modello fisico
     settings = get_cache().get_all_settings()
@@ -993,8 +1063,31 @@ def api_activity_power_bests(activity_id):
     if len(points) < 10:
         return jsonify({"error": "GPX con pochi punti validi", "bests": []})
 
+    # ── Sanity check: GPX ↔ DB ──────────────────────────────────
+    gpx_duration_s = points[-1]["t_s"] - points[0]["t_s"]
+    gpx_distance_m = points[-1]["dist_from_start_m"]
+    warning = None
+    if db_moving_s > 0 and gpx_duration_s < db_moving_s * 0.5:
+        warning = (
+            f"GPX copre solo {int(gpx_duration_s)}s "
+            f"({gpx_duration_s/60:.0f} min) su {db_moving_s}s "
+            f"({db_moving_s/60:.0f} min) nel DB — "
+            f"il file potrebbe essere troncato"
+        )
+        logger.warning(f"power-bests activity={activity_id}: {warning}")
+
+    # ── Smoothing elevazione (finestra mobile) ───────────────────
+    # Riduce rumore barometrico che causa pendenze assurde
+    ELE_SMOOTH_WIN = 7
+    if len(points) >= ELE_SMOOTH_WIN:
+        raw_ele = [p["ele"] for p in points]
+        half = ELE_SMOOTH_WIN // 2
+        for i in range(len(points)):
+            lo = max(0, i - half)
+            hi = min(len(points), i + half + 1)
+            points[i]["ele"] = sum(raw_ele[lo:hi]) / (hi - lo)
+
     # ── Outlier detection MAD-based sulle velocità ────────────────
-    # Calcola tutte le velocità punto-punto valide
     import statistics as _stats
     raw_speeds = []
     for i in range(1, len(points)):
@@ -1006,14 +1099,13 @@ def api_activity_power_bests(activity_id):
     if not raw_speeds:
         return jsonify({"error": "Nessun segmento valido", "bests": []})
 
-    # Soglia: mediana + 6 * MAD (robusto contro GPS glitch)
     v_median = _stats.median(raw_speeds)
     v_mad = _stats.median([abs(v - v_median) for v in raw_speeds])
     v_threshold = v_median + 6.0 * max(v_mad, 0.5)
 
-    MAX_SLOPE = 0.35        # 35%
+    MAX_SLOPE = 0.25        # 25% — clamp realistico per ciclismo
 
-    # Calcola potenza istantanea — outlier di velocità SCARTATI, non corretti
+    # Calcola potenza istantanea
     power_segments = []
 
     for i in range(1, len(points)):
@@ -1028,7 +1120,7 @@ def api_activity_power_bests(activity_id):
 
         v = dd / dt
         if v > v_threshold:
-            continue  # outlier GPS: scarta intero segmento
+            continue
 
         de = p1["ele"] - p0["ele"]
         slope = max(-MAX_SLOPE, min(MAX_SLOPE, de / dd))
@@ -1065,7 +1157,7 @@ def api_activity_power_bests(activity_id):
         sec = int(s) % 60
         return f"{m}m{sec:02d}s"
 
-    intervals_min = [5, 10, 15, 20, 25, 30, 40, 45, 55, 60]
+    intervals_min = [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 45, 55, 60]
     bests = []
 
     for interval_min in intervals_min:
@@ -1097,23 +1189,47 @@ def api_activity_power_bests(activity_id):
     if bests:
         get_cache().save_power_bests(activity_id, bests)
 
-    return jsonify({"bests": bests})
+    # Persisti warning nella tabella activities
+    get_cache()._conn.execute(
+        "UPDATE activities SET gpx_warning=? WHERE activity_id=?",
+        (warning, activity_id)
+    )
+    get_cache()._conn.commit()
+
+    result = {"bests": bests, "gpx_duration_s": int(gpx_duration_s), "gpx_points": len(points)}
+    if warning:
+        result["warning"] = warning
+    return jsonify(result)
 
 
 @app.route("/api/activities/<int:activity_id>/power-bests-ranked")
 def api_activity_power_bests_ranked(activity_id):
     """
     Restituisce i power bests di un'attività con rank rispetto a tutte le altre attività.
-    Usa cache DB; ricalcola solo se mancanti o invalidi (valori assurdi pre-fix).
+    Usa cache DB; ricalcola solo se mancanti o invalidi.
+    ?force=1 forza il ricalcolo (usato dopo refresh).
     """
+    force = request.args.get("force", "0") == "1"
     existing = get_cache().get_power_bests_for_activity(activity_id)
-    if not existing or any(b["watts"] > 2000 for b in existing):
+    need_recalc = force or not existing or any(b["watts"] > 2000 for b in existing)
+    pb_warning = None
+    if need_recalc:
         if existing:
             get_cache().delete_power_bests_for_activity(activity_id)
         with app.test_client() as client:
             resp = client.get(f"/api/activities/{activity_id}/power-bests")
             if resp.status_code != 200:
                 return jsonify({"bests": [], "error": "Calcolo power bests fallito"})
+            pb_data = resp.get_json()
+            pb_warning = pb_data.get("warning")
+    else:
+        # Leggi warning persistito dalla tabella activities
+        row = get_cache()._conn.execute(
+            "SELECT gpx_warning FROM activities WHERE activity_id=?",
+            (activity_id,)
+        ).fetchone()
+        if row and row[0]:
+            pb_warning = row[0]
 
     # Ora leggi con i rank
     ranked = get_cache().get_power_bests_with_rank(activity_id)
@@ -1128,7 +1244,10 @@ def api_activity_power_bests_ranked(activity_id):
         r["end_fmt"] = fmt_time(r["end_s"])
         r["interval_min"] = r["interval_minutes"]
 
-    return jsonify({"bests": ranked})
+    result = {"bests": ranked}
+    if pb_warning:
+        result["warning"] = pb_warning
+    return jsonify(result)
 
 
 @app.route("/api/power-bests/rankings")
@@ -1244,7 +1363,7 @@ def api_import():
     if token:
         _config["strava"]["access_token"] = token
 
-    seg = Segmentizer(config=_config)
+    seg = Segmentizer(config=_config, cache=get_cache())
 
     for f in files:
         try:
@@ -1331,7 +1450,7 @@ def api_strava_import_activity():
         filename  = f"strava_{strava_activity_id}_{safe_name[:40]}.gpx"
 
         src_path = _persist_gpx_payload(filename, gpx_content.encode("utf-8"))
-        seg = Segmentizer(config=_config)
+        seg = Segmentizer(config=_config, cache=get_cache())
         r = seg.process(src_path, activity_type=activity_type,
                         filename_override=filename,
                         strava_activity_id=strava_activity_id)

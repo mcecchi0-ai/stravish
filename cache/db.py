@@ -157,6 +157,7 @@ class SegmentCache:
         ("activities", "max_cadence",             "REAL DEFAULT NULL"),
         ("activities", "sigma_heartrate",         "REAL DEFAULT NULL"),
         ("activities", "sigma_cadence",           "REAL DEFAULT NULL"),
+        ("activities", "gpx_warning",             "TEXT DEFAULT NULL"),
     ]
 
     # Schema tabella power_bests (creata separatamente per retrocompatibilità)

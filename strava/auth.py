@@ -125,6 +125,31 @@ class StravaAuth:
         else:
             print("Nessun token salvato.")
 
+    def force_refresh(self):
+        """Forza il refresh del token, anche se non ancora scaduto."""
+        tokens = self._load_tokens()
+        if not tokens or "refresh_token" not in tokens:
+            return {"ok": False, "error": "no_token"}
+        client = Client()
+        try:
+            refreshed = client.refresh_access_token(
+                client_id=self.client_id,
+                client_secret=self.client_secret,
+                refresh_token=tokens["refresh_token"],
+            )
+            tokens.update({
+                "access_token":  refreshed["access_token"],
+                "refresh_token": refreshed["refresh_token"],
+                "expires_at":    refreshed["expires_at"],
+            })
+            self._save_tokens(tokens)
+            return {
+                "ok": True,
+                "expires_in_seconds": max(0, int(tokens["expires_at"] - time.time())),
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def status(self):
         tokens = self._load_tokens()
         if not tokens:
