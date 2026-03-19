@@ -629,7 +629,9 @@ function renderActivities() {
         return;
       }
       btn.disabled = true;
-      if (statusEl) statusEl.innerHTML = '<span>⟳ Fetching da Strava…</span>';
+      const act0 = allActivities.find(a => a.activity_id === id);
+      const actName = act0 ? (act0.activity_name || act0.filename) : `#${id}`;
+      showGlobalLoading(t('fetch.fetching'), actName);
       try {
         const res = await fetch(`${API}/api/activities/${id}/strava-efforts`, {
           method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -648,7 +650,6 @@ function renderActivities() {
           act.strava_effort_count   = (act.strava_effort_count || 0) + data.saved;
           act.effort_count          = (act.effort_count || 0) + data.saved;
         }
-        // Ricarica lista per aggiornare badge e colore pulsante dal DB
         await loadActivities();
         if (currentActivityId === id) {
           const efforts = await api(`/api/activities/${id}/efforts`);
@@ -662,6 +663,7 @@ function renderActivities() {
         if (statusEl) statusEl.innerHTML =
           `<span style="color:var(--orange)">⚠ ${err.message}</span>`;
       }
+      hideGlobalLoading();
       btn.disabled = false;
     });
     btn.addEventListener('click', e => e.stopPropagation());
@@ -730,6 +732,9 @@ function renderActivitySummary(s, medals, powerBests) {
     { label: t('summary.distance'),   value: s.total_distance_m >= 1000 ? (s.total_distance_m/1000).toFixed(1)+' '+t('unit.km') : (s.total_distance_m ? Math.round(s.total_distance_m)+' '+t('unit.m') : '—') },
     { label: t('summary.elevation'), value: s.total_elevation_m ? '+'+Math.round(s.total_elevation_m)+' '+t('unit.m') : '—' },
     { label: t('summary.time'),      value: fmtTime(s.moving_time_s) || '—' },
+    { label: t('summary.avgSpeed'),  value: s.total_distance_m && s.moving_time_s
+        ? `${(s.total_distance_m / s.moving_time_s * 3.6).toFixed(1)} ${t('unit.kmh')}`
+        : '—' },
     { label: t('summary.avgPower'),       value: s.avg_watts
         ? `${fmt(s.avg_watts)} ${t('unit.w')}`
         : (s.avg_watts_estimated
@@ -1406,8 +1411,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
     fetchBtn.disabled = true;
     const act0 = allActivities.find(a => a.activity_id===id);
     const actName = act0 ? (act0.activity_name || act0.filename) : `#${id}`;
-    if (statusEl) statusEl.innerHTML = `<span>${t('fetch.fetchingShort')}</span>`;
-    syncLogStart(id, actName);
+    showGlobalLoading(t('fetch.fetching'), actName);
     try {
       const res = await fetch(`${API}/api/activities/${id}/strava-efforts`, {
         method:'POST', headers:{'Content-Type':'application/json'},
@@ -1415,7 +1419,6 @@ document.getElementById('act-list').addEventListener('click', async e => {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      syncLogDone(id, t('fetch.success', {name: actName, count: data.saved}), false);
       if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">${t('fetch.imported', {count: data.saved})}</span>`;
       fetchBtn.textContent = '⟳ Strava'; fetchBtn.style.background = 'var(--green)';
       const act = allActivities.find(a => a.activity_id===id);
@@ -1425,7 +1428,6 @@ document.getElementById('act-list').addEventListener('click', async e => {
         act.strava_effort_count   = (act.strava_effort_count || 0) + data.saved;
         act.effort_count          = (act.effort_count || 0) + data.saved;
       }
-      // Ricarica lista per aggiornare badge
       await loadActivities();
       if (currentActivityId === id) {
         const efforts = await api(`/api/activities/${id}/efforts`);
@@ -1434,9 +1436,9 @@ document.getElementById('act-list').addEventListener('click', async e => {
       }
       await loadStatus();
     } catch(err) {
-      syncLogDone(id, t('fetch.error', {error: `${actName}: ${err.message}`}), true);
       if (statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">${t('fetch.error', {error: err.message})}</span>`;
     }
+    hideGlobalLoading();
     fetchBtn.disabled = false;
     return;
   }

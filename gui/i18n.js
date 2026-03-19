@@ -302,6 +302,10 @@ const I18N = {
       it: 'Potenza media',
       en: 'Avg Power'
     },
+    'summary.avgSpeed': {
+      it: 'Vel. media',
+      en: 'Avg Speed'
+    },
     'summary.calories': {
       it: 'Calorie',
       en: 'Calories'
@@ -523,6 +527,10 @@ const I18N = {
     'unit.kcal': {
       it: 'kcal',
       en: 'kcal'
+    },
+    'unit.kmh': {
+      it: 'km/h',
+      en: 'km/h'
     },
     'unit.mh': {
       it: 'm/h',

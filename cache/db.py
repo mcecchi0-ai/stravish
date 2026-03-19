@@ -374,7 +374,8 @@ class SegmentCache:
         """Aggiorna i campi metadata opzionali di un'attività."""
         allowed = {"moving_time_s", "avg_heartrate", "avg_watts", "avg_cadence",
                    "calories", "max_heartrate", "activity_name", "gpx_path",
-                   "max_cadence", "sigma_heartrate", "sigma_cadence"}
+                   "max_cadence", "sigma_heartrate", "sigma_cadence",
+                   "total_distance_m", "total_elevation_m"}
         fields = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
         if not fields:
             return

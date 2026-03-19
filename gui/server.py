@@ -198,16 +198,20 @@ def _save_strava_meta(cache, activity_id, activity):
         try: return float(val) if val is not None else None
         except: return None
     mt = getattr(activity, 'moving_time', None)
+    dist = _f(getattr(activity, 'distance', None))
+    elev = _f(getattr(activity, 'total_elevation_gain', None))
     cache.update_activity_meta(
         activity_id,
-        activity_name   = getattr(activity, 'name', None),
-        moving_time_s   = _to_seconds(mt) if mt else None,
-        avg_heartrate   = _f(getattr(activity, 'average_heartrate', None)),
-        max_heartrate   = _f(getattr(activity, 'max_heartrate', None)),
-        avg_watts       = _f(getattr(activity, 'average_watts', None)),
-        avg_cadence     = _f(getattr(activity, 'average_cadence', None)),
-        max_cadence     = _f(getattr(activity, 'max_cadence', None)),
-        calories        = getattr(activity, 'calories', None),
+        activity_name     = getattr(activity, 'name', None),
+        moving_time_s     = _to_seconds(mt) if mt else None,
+        avg_heartrate     = _f(getattr(activity, 'average_heartrate', None)),
+        max_heartrate     = _f(getattr(activity, 'max_heartrate', None)),
+        avg_watts         = _f(getattr(activity, 'average_watts', None)),
+        avg_cadence       = _f(getattr(activity, 'average_cadence', None)),
+        max_cadence       = _f(getattr(activity, 'max_cadence', None)),
+        calories          = getattr(activity, 'calories', None),
+        total_distance_m  = dist,
+        total_elevation_m = elev,
     )
 
 
