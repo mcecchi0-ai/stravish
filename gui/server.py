@@ -489,9 +489,6 @@ def api_set_settings():
     data = request.get_json(force=True)
     for k, v in data.items():
         get_cache().set_setting(k, v)
-    # Invalida power bests (dipendono da peso, crr, cda)
-    get_cache()._conn.execute("DELETE FROM power_bests")
-    get_cache()._conn.commit()
     return jsonify({"ok": True})
 
 
@@ -1653,7 +1650,14 @@ def api_ai_analysis(activity_id):
     power_bests = get_cache().get_power_bests_for_activity(activity_id)
     pb_lines = []
     for pb in (power_bests or []):
-        pb_lines.append(f"  {pb['interval_minutes']}min: {pb['watts']}W")
+        def _fmt_ss(s):
+            m = int(s) // 60
+            sec = int(s) % 60
+            return f"{m}m{sec:02d}s"
+        pb_lines.append(
+            f"  {pb['interval_minutes']}min: {pb['watts']}W"
+            f"  ({_fmt_ss(pb['start_s'])} → {_fmt_ss(pb['end_s'])})"
+        )
 
     # ── Segmenti / Effort ────────────────────────────────────────
     efforts = _get_effective_efforts_for_activity(activity_id)

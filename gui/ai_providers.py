@@ -149,13 +149,15 @@ class OpenAIProvider(AIProvider):
 class OpenRouterProvider(AIProvider):
     id = "openrouter"
     name = "OpenRouter"
-    default_model = "google/gemini-2.0-flash-exp:free"
+    default_model = "meta-llama/llama-3.3-70b-instruct:free"
     models = [
-        "google/gemini-2.0-flash-exp:free",
-        "deepseek/deepseek-chat-v3-0324:free",
-        "qwen/qwen3-235b-a22b:free",
-        "meta-llama/llama-4-maverick",
-        "meta-llama/llama-4-scout",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "nousresearch/hermes-3-llama-3.1-405b:free",
+        "google/gemma-3-27b-it:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "mistralai/mistral-small-3.1-24b-instruct:free",
+        "openai/gpt-oss-120b:free",
+        "qwen/qwen3-coder:free",
     ]
     auth_fields = [
         {"key": "api_key", "label": "API Key", "type": "password", "placeholder": "sk-or-…"},
@@ -170,21 +172,42 @@ class OpenRouterProvider(AIProvider):
         if not api_key:
             raise ValueError("OpenRouter API key mancante")
         model = model or self.default_model
-        body = self._http_post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            {
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7,
-                "max_tokens": 2048,
-            },
-            {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://github.com/stravish",
-            },
-            self.timeout_s,
-        )
+        try:
+            body = self._http_post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                {
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.7,
+                    "max_tokens": 2048,
+                },
+                {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                    "HTTP-Referer": "https://github.com/stravish",
+                },
+                self.timeout_s,
+            )
+        except ValueError as e:
+            if "404" in str(e) and model != self.default_model:
+                logger.warning("OpenRouter model %s non trovato, fallback a %s", model, self.default_model)
+                body = self._http_post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    {
+                        "model": self.default_model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.7,
+                        "max_tokens": 2048,
+                    },
+                    {
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {api_key}",
+                        "HTTP-Referer": "https://github.com/stravish",
+                    },
+                    self.timeout_s,
+                )
+            else:
+                raise
         return body["choices"][0]["message"]["content"]
 
 

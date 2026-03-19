@@ -635,7 +635,7 @@ const I18N = {
 
     // ─── AI ANALYSIS ────────────────────────────────────────────
     'settings.aiAnalysis': {
-      it: 'AI Analysis',
+      it: 'Analisi IA',
       en: 'AI Analysis'
     },
     'ai.provider': {
