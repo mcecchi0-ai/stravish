@@ -103,10 +103,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   .tree-seg-vam{font-size:10px;font-weight:600;color:var(--orange);background:rgba(252,76,2,.12);border-radius:3px;padding:1px 4px;margin-left:5px}
   #settings-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;align-items:center;justify-content:center}
   #settings-modal.open{display:flex}
-  #settings-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:420px;max-width:95vw;display:flex;flex-direction:column;overflow:hidden}
+  #settings-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:420px;max-width:95vw;max-height:90vh;display:flex;flex-direction:column;overflow:hidden}
   #settings-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
   #settings-header h3{flex:1;font-size:15px;font-weight:700}
-  #settings-body{padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+  #settings-body{padding:16px 18px;display:flex;flex-direction:column;gap:12px;overflow-y:auto}
   .settings-section{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-top:4px}
   .settings-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
   .settings-row label{font-size:12px;color:var(--text);flex:1}
@@ -234,6 +234,14 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .strava-auth-hint{font-size:10px;color:var(--text2);margin-top:6px}
 .strava-auth-hint code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:10px}
 
+/* AI ANALYSIS BUTTON */
+.ai-btn{background:linear-gradient(135deg,#6c5ce7,#a29bfe);color:white;border:none;padding:3px 10px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700;letter-spacing:.3px;transition:all .15s;flex-shrink:0}
+.ai-btn:hover{opacity:.85;transform:scale(1.03)}
+.ai-btn:disabled{opacity:.4;cursor:default;transform:none}
+.ai-btn.loading{animation:ai-pulse 1.2s ease-in-out infinite}
+@keyframes ai-pulse{0%,100%{opacity:.6}50%{opacity:1}}
+.ai-status{font-size:10px;min-height:12px;margin-top:2px}
+
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
@@ -342,6 +350,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
         <label data-i18n="settings.overlayTimeout"></label>
         <input type="number" id="cfg-overlay-timeout" min="0" max="600" step="10" placeholder="120">
       </div>
+      <div class="settings-section" data-i18n="settings.aiAnalysis"></div>
+      <div id="ai-provider-config"></div>
       <div class="settings-section" data-i18n="settings.stravaApi"></div>
       <div class="strava-auth-section">
         <div class="strava-auth-status">
@@ -553,6 +563,7 @@ async function loadSettings() {
   if (appSettings.overlay_timeout_s != null) {
     document.getElementById('cfg-overlay-timeout').value = appSettings.overlay_timeout_s;
   }
+  await loadAiProviderConfig();
 }
 
 // ── STRAVA AUTH STATUS ───────────────────────────────────────────
@@ -693,9 +704,20 @@ document.getElementById('settings-save').addEventListener('click', async () => {
     overlay_timeout_s: document.getElementById('cfg-overlay-timeout').value || '120',
   };
   await api('/api/settings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-  appSettings = payload;
+  // Salva anche configurazione AI
+  const aiCfg = _collectAiConfig();
+  if (aiCfg.provider) {
+    await api('/api/ai/config', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(aiCfg)
+    });
+    _aiActiveModel = aiCfg.model;
+    _aiSavedAuth[aiCfg.provider] = aiCfg.auth;
+  }
+  // Ricarica settings dal server per avere tutto in sync
+  try { appSettings = await api('/api/settings'); } catch(e) {}
   const saved = document.getElementById('settings-saved');
-  saved.textContent = '✓ Salvato';
+  saved.textContent = t('settings.saved');
   setTimeout(() => saved.textContent = '', 2000);
   // Ricarica summary attivo se aperto
   if (currentActivityId) showActivitySummary(currentActivityId);
@@ -1025,10 +1047,15 @@ function renderActivitySummary(s, medals, powerBests, powerWarning) {
 
   const notesHtml = `
     <div style="padding:10px 14px 14px">
-      <div class="section-title" style="padding:0 0 6px">${t('summary.notes')}</div>
+      <div style="display:flex;align-items:center;gap:8px;padding:0 0 6px">
+        <div class="section-title" style="padding:0;margin:0;flex:1">${t('summary.notes')}</div>
+        <button class="ai-btn" id="ai-analyze-btn" data-id="${s.activity_id}"
+          title="${t('ai.btnTitle')}">${t('ai.btn')}</button>
+      </div>
       <textarea class="act-notes-area detail-notes" data-id="${s.activity_id}"
         placeholder="${t('summary.notesPlaceholder')}">${s.notes||''}</textarea>
       <div class="notes-saved" id="ns-${s.activity_id}"></div>
+      <div class="ai-status" id="ai-status-${s.activity_id}"></div>
     </div>`;
 
   document.getElementById('right-body').innerHTML = `
@@ -1041,6 +1068,142 @@ function renderActivitySummary(s, medals, powerBests, powerWarning) {
 
   const detailTa = document.querySelector('.detail-notes');
   if (detailTa) attachNotesSave(detailTa);
+
+  // AI analysis button
+  const aiBtn = document.getElementById('ai-analyze-btn');
+  if (aiBtn) aiBtn.addEventListener('click', () => runAiAnalysis(+aiBtn.dataset.id));
+}
+
+// ── AI ANALYSIS ──────────────────────────────────────────────────
+
+let _aiProviders = [];
+let _aiActive = '';
+let _aiActiveModel = '';
+let _aiSavedAuth = {};
+
+async function loadAiProviderConfig() {
+  try {
+    const data = await api('/api/ai/providers');
+    _aiProviders = data.providers || [];
+    _aiActive = data.active || '';
+    _aiActiveModel = data.active_model || '';
+    _aiSavedAuth = data.saved_auth || {};
+  } catch(e) { _aiProviders = []; }
+  renderAiProviderConfig();
+}
+
+function renderAiProviderConfig() {
+  const container = document.getElementById('ai-provider-config');
+  if (!container) return;
+
+  // Provider selector
+  let html = `<div class="settings-row">
+    <label>${t('ai.provider')}</label>
+    <select id="cfg-ai-provider" style="width:200px">
+      <option value="">— ${t('ai.selectProvider')} —</option>
+      ${_aiProviders.map(p => `<option value="${p.id}" ${p.id===_aiActive?'selected':''}>${p.name}</option>`).join('')}
+    </select>
+  </div>`;
+
+  // Model selector (per il provider attivo)
+  const active = _aiProviders.find(p => p.id === _aiActive);
+  if (active && active.models.length) {
+    html += `<div class="settings-row" style="margin-top:6px">
+      <label>${t('ai.model')}</label>
+      <select id="cfg-ai-model" style="width:200px">
+        ${active.models.map(m => `<option value="${m}" ${m===(_aiActiveModel||active.default_model)?'selected':''}>${m}</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
+  // Auth fields per il provider attivo
+  if (active) {
+    const savedAuth = _aiSavedAuth[active.id] || {};
+    for (const field of active.auth_fields) {
+      html += `<div class="settings-row" style="margin-top:6px">
+        <label>${field.label}</label>
+        <input type="${field.type||'password'}" class="ai-auth-field"
+               data-provider="${active.id}" data-field="${field.key}"
+               value="${savedAuth[field.key]||''}"
+               placeholder="${field.placeholder||''}" style="width:200px">
+      </div>`;
+    }
+    // Hint
+    const lang = I18N.getLang();
+    const hint = active.hint_html[lang] || active.hint_html['en'] || '';
+    if (hint) {
+      html += `<div style="font-size:10px;color:var(--text2);margin-top:2px">${hint}</div>`;
+    }
+  }
+
+  container.innerHTML = html;
+
+  // Events
+  const providerSel = document.getElementById('cfg-ai-provider');
+  if (providerSel) {
+    providerSel.addEventListener('change', () => {
+      _aiActive = providerSel.value;
+      _aiActiveModel = '';
+      renderAiProviderConfig();
+    });
+  }
+}
+
+function _collectAiConfig() {
+  const providerId = document.getElementById('cfg-ai-provider')?.value || '';
+  const modelSel = document.getElementById('cfg-ai-model');
+  const model = modelSel ? modelSel.value : '';
+  const auth = {};
+  document.querySelectorAll('.ai-auth-field').forEach(inp => {
+    if (inp.dataset.provider === providerId) {
+      auth[inp.dataset.field] = inp.value.trim();
+    }
+  });
+  return {provider: providerId, model, auth};
+}
+
+async function runAiAnalysis(activityId) {
+  const btn = document.getElementById('ai-analyze-btn');
+  const statusEl = document.getElementById('ai-status-' + activityId);
+  const ta = document.querySelector('.detail-notes');
+
+  // Verifica provider configurato
+  if (!appSettings.ai_provider && !_aiActive) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">${t('ai.noProvider')}</span>`;
+    return;
+  }
+
+  btn.disabled = true;
+  btn.classList.add('loading');
+  btn.textContent = '⟳';
+  if (statusEl) statusEl.innerHTML = `<span style="color:var(--text2)">${t('ai.analyzing')}</span>`;
+
+  try {
+    const res = await fetch(`${API}/api/activities/${activityId}/ai-analysis`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({lang: I18N.getLang()})
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Unknown error');
+
+    // Aggiorna textarea con le nuove note (contengono l'analisi)
+    if (ta) ta.value = data.notes;
+    // Aggiorna anche l'array in-memory
+    const act = allActivities.find(a => a.activity_id === activityId);
+    if (act) act.notes = data.notes;
+
+    if (statusEl) {
+      statusEl.innerHTML = `<span style="color:var(--green)">${t('ai.done')}</span>`;
+      setTimeout(() => statusEl.textContent = '', 5000);
+    }
+  } catch(err) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">${t('ai.error', {error: err.message})}</span>`;
+  }
+
+  btn.disabled = false;
+  btn.classList.remove('loading');
+  btn.textContent = t('ai.btn');
 }
 
 // ── TREEVIEW ──────────────────────────────────────────────────────
@@ -1772,8 +1935,11 @@ document.getElementById('sync-import-selected').addEventListener('click', async 
       if (data.error) throw new Error(data.error);
       row.classList.add('imported');
       cb.checked=true; cb.disabled=true;
+      const gpxInfo = data.gpx_stats
+        ? ` · ${(data.gpx_stats.total_distance_m/1000).toFixed(1)}km`
+        : (data.gpx_skipped ? ` · ${t('sync.noGpx')}` : '');
       row.querySelector('.strava-act-info').insertAdjacentHTML('beforeend',
-        `<div style="font-size:10px;color:var(--green);margin-top:2px">✓ ${data.strava_efforts} effort · ${(data.gpx_stats.total_distance_m/1000).toFixed(1)}km</div>`);
+        `<div style="font-size:10px;color:var(--green);margin-top:2px">✓ ${data.strava_efforts} effort${gpxInfo}</div>`);
       if (act) act.imported=true;
       done++;
     } catch(e) {
@@ -1784,7 +1950,7 @@ document.getElementById('sync-import-selected').addEventListener('click', async 
     updateSyncCount();
   }
   btn.disabled=false;
-  btn.textContent=`⬇ Importa da Strava`;
+  btn.textContent=t('btn.importFromStrava');
   await Promise.all([loadStatus(), loadActivities()]);
 });
 
@@ -1793,8 +1959,8 @@ function updateSyncCount(){
   document.getElementById('sync-import-selected').style.display = checked>0 ? 'inline-block' : 'none';
   const imported=stravaActivities.filter(a=>a.imported).length;
   document.getElementById('sync-count').innerHTML=
-    checked>0?`<b style="color:var(--orange)">${checked}</b> da scaricare · ${imported}/${stravaActivities.length} già importate`
-    :`${imported}/${stravaActivities.length} già importate`;
+    checked>0?t('sync.toDownload',{count:checked,imported:imported,total:stravaActivities.length})
+    :t('sync.alreadyImported',{imported:imported,total:stravaActivities.length});
 }
 
 // ── UTILS ─────────────────────────────────────────────────────────

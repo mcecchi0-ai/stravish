@@ -1440,24 +1440,49 @@ def api_strava_import_activity():
         activity = _fetch_activity(client, int(strava_activity_id), context="import-activity")
         act_name = activity.name or f"Strava {strava_activity_id}"
 
-        # 2. Ricostruisci GPX dagli stream
-        gpx_content = build_gpx_from_streams(client, strava_activity_id, act_name)
-        if not gpx_content:
-            return jsonify({"error": "Stream GPS non disponibili per questa attività"}), 400
-
-        # 3. Salva GPX temporaneo e importa via pipeline
         safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in act_name)
         filename  = f"strava_{strava_activity_id}_{safe_name[:40]}.gpx"
 
-        src_path = _persist_gpx_payload(filename, gpx_content.encode("utf-8"))
-        seg = Segmentizer(config=_config, cache=get_cache())
-        r = seg.process(src_path, activity_type=activity_type,
-                        filename_override=filename,
-                        strava_activity_id=strava_activity_id)
+        # 2. Ricostruisci GPX dagli stream (non bloccante se fallisce)
+        gpx_content = build_gpx_from_streams(client, strava_activity_id, act_name)
 
-        activity_id = r["activity_id"]
+        gpx_stats = None
+        segments_matched = 0
+        gpx_skipped = False
 
-        # 3b. Salva metadata Strava nell'attività
+        if gpx_content:
+            # GPX disponibile — pipeline completa
+            src_path = _persist_gpx_payload(filename, gpx_content.encode("utf-8"))
+            seg = Segmentizer(config=_config, cache=get_cache())
+            r = seg.process(src_path, activity_type=activity_type,
+                            filename_override=filename,
+                            strava_activity_id=strava_activity_id)
+            activity_id = r["activity_id"]
+            gpx_stats = r.get("gpx_stats", {})
+            segments_matched = len(r["segments_matched"])
+        else:
+            # GPX non disponibile — crea attività senza tracciato e prosegui
+            logger.warning(
+                "Stream GPS non disponibili per Strava %s, procedo senza GPX",
+                strava_activity_id,
+            )
+            gpx_skipped = True
+            act_date = None
+            if activity.start_date:
+                act_date = activity.start_date.strftime("%Y-%m-%dT%H:%M:%S")
+            dist = float(activity.distance or 0)
+            elev = float(activity.total_elevation_gain or 0)
+            activity_id = get_cache().find_activity(
+                filename, act_date, strava_activity_id=strava_activity_id
+            )
+            if not activity_id:
+                activity_id = get_cache().insert_activity(
+                    filename, act_date, dist, elev, 0,
+                    strava_activity_id=strava_activity_id,
+                    strava_effort_source="strava_api",
+                )
+
+        # 3. Salva metadata Strava nell'attività
         _save_strava_meta(get_cache(), activity_id, activity)
 
         # 4. Fetch effort Strava API — idempotente per strava_effort_id
@@ -1467,18 +1492,259 @@ def api_strava_import_activity():
         )
         get_cache().update_activity_strava_id(activity_id, int(strava_activity_id), "strava_api")
 
-        return jsonify({
+        result = {
             "ok": True,
             "activity_id": activity_id,
             "filename": filename,
-            "segments_matched": len(r["segments_matched"]),
+            "segments_matched": segments_matched,
             "strava_efforts": saved,
-            "gpx_stats": r["gpx_stats"],
-        })
+            "gpx_skipped": gpx_skipped,
+        }
+        if gpx_stats:
+            result["gpx_stats"] = gpx_stats
+        return jsonify(result)
 
     except Exception as e:
         logger.error("strava_import_activity ERROR:\n%s", traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+
+
+# ------------------------------------------------------------------ #
+# AI Analysis (multi-provider)
+# ------------------------------------------------------------------ #
+
+from gui.ai_providers import get_provider, list_providers as _list_ai_providers
+
+
+@app.route("/api/ai/providers")
+def api_ai_providers():
+    """Lista provider AI disponibili con i relativi campi auth e modelli."""
+    settings = get_cache().get_all_settings()
+    active = settings.get("ai_provider", "")
+    # Restituisci anche le credenziali salvate (mascherando i valori sensibili)
+    saved = {}
+    for key, val in settings.items():
+        if key.startswith("ai_auth_"):
+            # ai_auth_gemini_api_key → provider=gemini, field=api_key
+            rest = key[len("ai_auth_"):]
+            parts = rest.split("_", 1)
+            if len(parts) == 2:
+                pid, fkey = parts[0], parts[1]
+                saved.setdefault(pid, {})[fkey] = val
+    return jsonify({
+        "providers": _list_ai_providers(),
+        "active": active,
+        "active_model": settings.get("ai_model", ""),
+        "saved_auth": saved,
+    })
+
+
+@app.route("/api/ai/config", methods=["POST"])
+def api_ai_config():
+    """Salva provider attivo, modello e credenziali auth."""
+    data = request.get_json(force=True)
+    cache = get_cache()
+    if "provider" in data:
+        cache.set_setting("ai_provider", data["provider"])
+    if "model" in data:
+        cache.set_setting("ai_model", data["model"])
+    # Salva credenziali per il provider
+    provider_id = data.get("provider", "")
+    auth = data.get("auth", {})
+    for fkey, fval in auth.items():
+        cache.set_setting(f"ai_auth_{provider_id}_{fkey}", fval)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/activities/<int:activity_id>/ai-analysis", methods=["POST"])
+def api_ai_analysis(activity_id):
+    """
+    Confeziona un prompt con profilo ciclista, summary, power bests, segmenti
+    e stream GPX, poi invia al provider AI configurato.
+    La risposta viene salvata nel campo note dell'attività.
+    """
+    settings = get_cache().get_all_settings()
+
+    # ── Provider ─────────────────────────────────────────────────
+    provider_id = settings.get("ai_provider", "").strip()
+    if not provider_id:
+        return jsonify({"error": "Nessun provider AI configurato"}), 400
+    try:
+        provider = get_provider(provider_id)
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+
+    # Auth: raccogli i campi salvati per questo provider
+    auth = {}
+    for field in provider.auth_fields:
+        fkey = field["key"]
+        auth[fkey] = settings.get(f"ai_auth_{provider_id}_{fkey}", "")
+
+    model = settings.get("ai_model", "") or None
+
+    # ── Dati attività ────────────────────────────────────────────
+    row = get_cache()._conn.execute(
+        "SELECT * FROM activities WHERE activity_id=?", (activity_id,)
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "Attività non trovata"}), 404
+    act = dict(row)
+    act.pop("gpx_points", None)
+
+    # Summary
+    summary_parts = []
+    name = act.get("activity_name") or act.get("filename") or "?"
+    summary_parts.append(f"Nome: {name}")
+    if act.get("activity_date"):
+        summary_parts.append(f"Data: {act['activity_date']}")
+    if act.get("total_distance_m"):
+        summary_parts.append(f"Distanza: {act['total_distance_m']/1000:.1f} km")
+    if act.get("total_elevation_m"):
+        summary_parts.append(f"Dislivello: +{int(act['total_elevation_m'])} m")
+    if act.get("moving_time_s"):
+        h = int(act["moving_time_s"]) // 3600
+        m = (int(act["moving_time_s"]) % 3600) // 60
+        summary_parts.append(f"Tempo: {h}h {m}m")
+    if act.get("avg_watts"):
+        summary_parts.append(f"Potenza media: {int(act['avg_watts'])} W")
+    if act.get("avg_heartrate"):
+        summary_parts.append(f"BPM medi: {int(act['avg_heartrate'])}")
+    if act.get("max_heartrate"):
+        summary_parts.append(f"BPM max: {int(act['max_heartrate'])}")
+    if act.get("avg_cadence"):
+        summary_parts.append(f"Cadenza media: {int(act['avg_cadence'])} rpm")
+    if act.get("calories"):
+        summary_parts.append(f"Calorie: {int(act['calories'])} kcal")
+    # Velocità media
+    if act.get("total_distance_m") and act.get("moving_time_s"):
+        avg_speed = act["total_distance_m"] / act["moving_time_s"] * 3.6
+        summary_parts.append(f"Velocità media: {avg_speed:.1f} km/h")
+    # Stima watt se non presenti
+    if not act.get("avg_watts") and act.get("total_distance_m") and act.get("moving_time_s") and act.get("total_elevation_m"):
+        try:
+            import math
+            m_rider = float(settings.get("weight_kg", 75))
+            m_bike = float(settings.get("bike_kg", 10))
+            crr = float(settings.get("crr", 0.005))
+            cda = float(settings.get("cda", 0.32))
+            m_tot = m_rider + m_bike
+            dist = act["total_distance_m"]
+            t_s = act["moving_time_s"]
+            elev = act["total_elevation_m"]
+            v = dist / t_s
+            slope = elev / dist
+            fg = m_tot * 9.81 * math.sin(math.atan(slope))
+            fr = m_tot * 9.81 * math.cos(math.atan(slope)) * crr
+            fa = 0.5 * 1.225 * cda * v ** 2
+            p_est = max(0, (fg + fr + fa) * v)
+            summary_parts.append(f"Potenza media stimata: {round(p_est)} W")
+        except Exception:
+            pass
+
+    # ── Profilo ciclista ─────────────────────────────────────────
+    profile_parts = [
+        f"Peso ciclista: {settings.get('weight_kg', '75')} kg",
+        f"Peso bici: {settings.get('bike_kg', '10')} kg",
+        f"CdA: {settings.get('cda', '0.32')}",
+        f"Crr: {settings.get('crr', '0.005')}",
+    ]
+
+    # ── Power bests ──────────────────────────────────────────────
+    power_bests = get_cache().get_power_bests_for_activity(activity_id)
+    pb_lines = []
+    for pb in (power_bests or []):
+        pb_lines.append(f"  {pb['interval_minutes']}min: {pb['watts']}W")
+
+    # ── Segmenti / Effort ────────────────────────────────────────
+    efforts = _get_effective_efforts_for_activity(activity_id)
+    seg_lines = []
+    for e in efforts:
+        _enrich_effort(e)
+        line = f"  - {e.get('name', '?')}: {e.get('elapsed_seconds', 0)}s"
+        if e.get("distance_m"):
+            line += f", {e['distance_m']/1000:.2f}km"
+        if e.get("avg_grade_pct"):
+            line += f", {e['avg_grade_pct']:.1f}%"
+        if e.get("vam"):
+            line += f", VAM {e['vam']}"
+        if e.get("average_heartrate"):
+            line += f", {int(e['average_heartrate'])}bpm"
+        seg_lines.append(line)
+
+    # ── Stream GPX (decimato per stare nel budget token) ─────────
+    stream_lines = []
+    gpx_path = act.get("gpx_path")
+    if gpx_path and Path(gpx_path).exists():
+        try:
+            from utils.gpx_utils import parse_gpx_points, compute_distances
+            points = parse_gpx_points(gpx_path)
+            points = compute_distances(points)
+            step = max(1, len(points) // 500)
+            t0 = points[0]["time"]
+            for i in range(0, len(points), step):
+                p = points[i]
+                t_s = (p["time"] - t0).total_seconds() if p["time"] and t0 else 0
+                stream_lines.append(
+                    f"{int(t_s)}s,{p['ele']:.0f}m,{p['dist_from_start_m']:.0f}m"
+                )
+        except Exception as ex:
+            logger.debug(f"AI: GPX stream parse fallito: {ex}")
+
+    # ── Lingua ───────────────────────────────────────────────────
+    req_data = request.get_json(silent=True) or {}
+    lang = req_data.get("lang", "it")
+    lang_instruction = "Rispondi in italiano." if lang == "it" else "Reply in English."
+
+    # ── Composizione prompt ──────────────────────────────────────
+    prompt = f"""Sei un coach ciclistico esperto e analista di dati sportivi.
+Analizza questa uscita in bici e fornisci un report dettagliato.
+{lang_instruction}
+
+PROFILO CICLISTA:
+{chr(10).join(profile_parts)}
+
+SOMMARIO ATTIVITÀ:
+{chr(10).join(summary_parts)}
+"""
+    if pb_lines:
+        prompt += f"\nRECORD DI POTENZA (stimata, sliding window):\n{chr(10).join(pb_lines)}\n"
+
+    if seg_lines:
+        prompt += f"\nSEGMENTI PERCORSI ({len(seg_lines)}):\n{chr(10).join(seg_lines)}\n"
+
+    if stream_lines:
+        prompt += f"\nSTREAM GPS (tempo,elevazione,distanza) — {len(stream_lines)} campioni:\n{chr(10).join(stream_lines)}\n"
+
+    prompt += """
+Fornisci:
+1. Valutazione complessiva della prestazione
+2. Analisi della gestione dello sforzo (pacing)
+3. Punti di forza e aree di miglioramento
+4. Consigli specifici per l'allenamento
+5. Eventuali osservazioni sulle salite e i segmenti
+Sii conciso ma preciso, usa dati numerici quando possibile."""
+
+    # ── Chiamata provider ────────────────────────────────────────
+    prompt_len = len(prompt)
+    prompt_tokens_est = prompt_len // 4  # stima approssimativa
+    logger.info("AI prompt: %d chars (~%d tokens), provider=%s, model=%s",
+                prompt_len, prompt_tokens_est, provider_id, model)
+    try:
+        ai_text = provider.complete(prompt, model, auth)
+    except Exception as ex:
+        logger.error("AI provider %s error: %s", provider_id, ex)
+        return jsonify({"error": str(ex)}), 502
+
+    # ── Salva nelle note ─────────────────────────────────────────
+    existing_notes = act.get("notes") or ""
+    separator = "\n\n═══ 🤖 AI Analysis ═══\n\n"
+    if separator.strip() in existing_notes:
+        idx = existing_notes.index("═══ 🤖 AI Analysis ═══")
+        existing_notes = existing_notes[:idx].rstrip()
+    new_notes = (existing_notes + separator + ai_text).strip()
+    get_cache().update_activity_notes(activity_id, new_notes)
+
+    return jsonify({"ok": True, "analysis": ai_text, "notes": new_notes})
 
 
 # ------------------------------------------------------------------ #

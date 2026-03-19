@@ -284,6 +284,10 @@ const I18N = {
       it: '{imported}/{total} già importate',
       en: '{imported}/{total} already imported'
     },
+    'sync.noGpx': {
+      it: 'senza GPX',
+      en: 'no GPX'
+    },
 
     // ─── ACTIVITY SUMMARY ───────────────────────────────────────
     'summary.distance': {
@@ -627,6 +631,48 @@ const I18N = {
     'strava.loginHint': {
       it: 'Esegui <code>python run.py auth login</code> per autorizzare',
       en: 'Run <code>python run.py auth login</code> to authorize'
+    },
+
+    // ─── AI ANALYSIS ────────────────────────────────────────────
+    'settings.aiAnalysis': {
+      it: 'AI Analysis',
+      en: 'AI Analysis'
+    },
+    'ai.provider': {
+      it: 'Provider',
+      en: 'Provider'
+    },
+    'ai.model': {
+      it: 'Modello',
+      en: 'Model'
+    },
+    'ai.selectProvider': {
+      it: 'Seleziona provider',
+      en: 'Select provider'
+    },
+    'ai.btn': {
+      it: '🤖 AI',
+      en: '🤖 AI'
+    },
+    'ai.btnTitle': {
+      it: 'Analisi AI dell\'attività',
+      en: 'AI activity analysis'
+    },
+    'ai.analyzing': {
+      it: '🤖 Analisi AI in corso…',
+      en: '🤖 AI analysis in progress…'
+    },
+    'ai.noProvider': {
+      it: '⚠ Configura un provider AI nelle Impostazioni',
+      en: '⚠ Configure an AI provider in Settings'
+    },
+    'ai.error': {
+      it: '⚠ Errore AI: {error}',
+      en: '⚠ AI error: {error}'
+    },
+    'ai.done': {
+      it: '✓ Analisi AI completata e salvata nelle note',
+      en: '✓ AI analysis complete and saved to notes'
     },
 
     // ─── MISC ───────────────────────────────────────────────────
