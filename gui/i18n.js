@@ -541,6 +541,32 @@ const I18N = {
       en: 'min'
     },
 
+    // ─── OVERLAY / TIMEOUT ──────────────────────────────────────
+    'overlay.cancel': {
+      it: '✕ Annulla',
+      en: '✕ Cancel'
+    },
+    'overlay.cancelled': {
+      it: 'Operazione annullata.',
+      en: 'Operation cancelled.'
+    },
+    'overlay.timedOut': {
+      it: 'Operazione annullata: timeout di {seconds}s raggiunto.',
+      en: 'Operation cancelled: {seconds}s timeout reached.'
+    },
+    'overlay.timeRemaining': {
+      it: 'Timeout in {seconds}s…',
+      en: 'Timeout in {seconds}s…'
+    },
+    'settings.operations': {
+      it: 'Operazioni',
+      en: 'Operations'
+    },
+    'settings.overlayTimeout': {
+      it: 'Timeout overlay (secondi, 0 = disabilitato)',
+      en: 'Overlay timeout (seconds, 0 = disabled)'
+    },
+
     // ─── MISC ───────────────────────────────────────────────────
     'misc.on': {
       it: 'su',

@@ -192,6 +192,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 #global-loading .spinner{font-size:32px;color:var(--orange)}
 #global-loading .loading-text{font-size:14px;color:var(--text);font-weight:600}
 #global-loading .loading-sub{font-size:12px;color:var(--text2)}
+#global-loading .loading-countdown{font-size:11px;color:var(--text2);margin-top:2px;min-height:14px}
+#loading-cancel{margin-top:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);padding:6px 18px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;transition:all .15s}
+#loading-cancel:hover{background:var(--border);color:var(--orange)}
 
 /* STRAVA SYNC MODAL */
 #sync-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;align-items:center;justify-content:center}
@@ -318,6 +321,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
           <option value="0.22" data-i18n="settings.posTT"></option>
         </select>
       </div>
+      <div class="settings-section" data-i18n="settings.operations"></div>
+      <div class="settings-row">
+        <label data-i18n="settings.overlayTimeout"></label>
+        <input type="number" id="cfg-overlay-timeout" min="0" max="600" step="10" placeholder="120">
+      </div>
     </div>
     <div id="settings-footer">
       <span id="settings-saved" style="font-size:11px;color:var(--green)"></span>
@@ -330,6 +338,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <span class="spinner">⟳</span>
   <span class="loading-text" data-i18n="import.inProgress"></span>
   <span class="loading-sub" id="loading-detail"></span>
+  <span class="loading-countdown" id="loading-countdown"></span>
+  <button id="loading-cancel" data-i18n="overlay.cancel"></button>
 </div>
 
 <div id="sync-modal">
@@ -503,6 +513,9 @@ async function loadSettings() {
     const sel = document.getElementById('cfg-cda');
     [...sel.options].forEach(o => { if (Math.abs(+o.value - +appSettings.cda) < 0.001) o.selected = true; });
   }
+  if (appSettings.overlay_timeout_s != null) {
+    document.getElementById('cfg-overlay-timeout').value = appSettings.overlay_timeout_s;
+  }
 }
 
 document.getElementById('btn-settings').addEventListener('click', () => {
@@ -521,6 +534,7 @@ document.getElementById('settings-save').addEventListener('click', async () => {
     bike_kg:   document.getElementById('cfg-bike').value   || '10',
     crr:       document.getElementById('cfg-crr').value,
     cda:       document.getElementById('cfg-cda').value,
+    overlay_timeout_s: document.getElementById('cfg-overlay-timeout').value || '120',
   };
   await api('/api/settings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
   appSettings = payload;
@@ -635,7 +649,8 @@ function renderActivities() {
       try {
         const res = await fetch(`${API}/api/activities/${id}/strava-efforts`, {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({strava_activity_id: +stravaId})
+          body: JSON.stringify({strava_activity_id: +stravaId}),
+          signal: getOverlaySignal()
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -660,7 +675,7 @@ function renderActivities() {
         }
         await loadStatus();
       } catch(err) {
-        if (statusEl) statusEl.innerHTML =
+        if (err.name !== 'AbortError' && statusEl) statusEl.innerHTML =
           `<span style="color:var(--orange)">⚠ ${err.message}</span>`;
       }
       hideGlobalLoading();
@@ -1273,7 +1288,8 @@ document.getElementById('act-list').addEventListener('click', async e => {
     try {
       const resp = await fetch(`${API}/api/activities/${id}/refresh`, {
         method:'POST',
-        body: fd
+        body: fd,
+        signal: getOverlaySignal()
       });
       if (!resp.ok) {
         let errMsg = await resp.text();
@@ -1288,7 +1304,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
         if (activeSeg) await selectSegment(activeSeg);
       }
     } catch(err) {
-      alert(t('error.refreshFailed', {message: err.message}));
+      if (err.name !== 'AbortError') alert(t('error.refreshFailed', {message: err.message}));
     } finally {
       hideGlobalLoading();
     }
@@ -1326,15 +1342,70 @@ overlay.addEventListener('drop', e=>{e.preventDefault();dropZone.classList.remov
 
 let _pendingImportResults = [];
 
+let _overlayAbort = null;   // current AbortController (null when idle)
+let _overlayTimer = null;   // countdown setInterval id
+let _overlayTimeout = null; // setTimeout id for auto-cancel
+
+function _getOverlayTimeoutSec() {
+  const v = parseInt(appSettings.overlay_timeout_s, 10);
+  return (!isNaN(v) && v >= 0) ? v : 120; // default 120 s, 0 = disabled
+}
+
 function showGlobalLoading(msg, detail) {
+  // Abort any previous overlay operation
+  if (_overlayAbort) { try { _overlayAbort.abort(); } catch(e){} }
+  clearInterval(_overlayTimer);
+  clearTimeout(_overlayTimeout);
+
+  _overlayAbort = new AbortController();
   const el = document.getElementById('global-loading');
   el.querySelector('.loading-text').textContent = msg || t('import.inProgress');
   document.getElementById('loading-detail').textContent = detail || '';
+  document.getElementById('loading-countdown').textContent = '';
   el.classList.add('active');
+
+  const timeoutSec = _getOverlayTimeoutSec();
+  if (timeoutSec > 0) {
+    let remaining = timeoutSec;
+    document.getElementById('loading-countdown').textContent = t('overlay.timeRemaining', {seconds: remaining});
+    _overlayTimer = setInterval(() => {
+      remaining--;
+      if (remaining > 0) {
+        document.getElementById('loading-countdown').textContent = t('overlay.timeRemaining', {seconds: remaining});
+      } else {
+        clearInterval(_overlayTimer);
+        _overlayTimer = null;
+      }
+    }, 1000);
+    _overlayTimeout = setTimeout(() => {
+      clearInterval(_overlayTimer);
+      _overlayTimer = null;
+      if (_overlayAbort) { _overlayAbort.abort(); _overlayAbort = null; }
+      document.getElementById('global-loading').classList.remove('active');
+      alert(t('overlay.timedOut', {seconds: timeoutSec}));
+    }, timeoutSec * 1000);
+  }
 }
+
 function hideGlobalLoading() {
+  clearInterval(_overlayTimer);
+  clearTimeout(_overlayTimeout);
+  _overlayTimer = null;
+  _overlayTimeout = null;
+  _overlayAbort = null;
   document.getElementById('global-loading').classList.remove('active');
 }
+
+function cancelGlobalLoading() {
+  if (_overlayAbort) { _overlayAbort.abort(); _overlayAbort = null; }
+  hideGlobalLoading();
+}
+
+function getOverlaySignal() {
+  return _overlayAbort ? _overlayAbort.signal : undefined;
+}
+
+document.getElementById('loading-cancel').addEventListener('click', cancelGlobalLoading);
 
 async function importFiles(files) {
   if (!files.length) return;
@@ -1344,13 +1415,16 @@ async function importFiles(files) {
   const fd = new FormData();
   Array.from(files).forEach(f=>fd.append('gpx',f));
   try {
-    const resp = await fetch(`${API}/api/import`,{method:'POST',body:fd});
+    const resp = await fetch(`${API}/api/import`,{method:'POST',body:fd, signal:getOverlaySignal()});
     _pendingImportResults = await resp.json();
     const errors = _pendingImportResults.filter(r=>r.error);
     if (errors.length) {
       alert(errors.map(r=>`❌ ${r.filename}: ${r.error}`).join('\n'));
     }
-  } catch(e) { alert(t('error.generic', {message: e.message})); _pendingImportResults=[]; }
+  } catch(e) {
+    if (e.name === 'AbortError') { _pendingImportResults=[]; }
+    else { alert(t('error.generic', {message: e.message})); _pendingImportResults=[]; }
+  }
   hideGlobalLoading();
   await Promise.all([loadStatus(), loadActivities()]);
   _pendingImportResults = [];
@@ -1415,7 +1489,8 @@ document.getElementById('act-list').addEventListener('click', async e => {
     try {
       const res = await fetch(`${API}/api/activities/${id}/strava-efforts`, {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({strava_activity_id: +stravaId})
+        body: JSON.stringify({strava_activity_id: +stravaId}),
+        signal: getOverlaySignal()
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -1436,7 +1511,7 @@ document.getElementById('act-list').addEventListener('click', async e => {
       }
       await loadStatus();
     } catch(err) {
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">${t('fetch.error', {error: err.message})}</span>`;
+      if (err.name !== 'AbortError' && statusEl) statusEl.innerHTML = `<span style="color:var(--orange)">${t('fetch.error', {error: err.message})}</span>`;
     }
     hideGlobalLoading();
     fetchBtn.disabled = false;
