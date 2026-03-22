@@ -592,6 +592,9 @@ def api_activity_medals(activity_id):
         )
         if best_for_activity is None:
             continue
+        # Salta se questo segmento è già stato aggiunto (possibile con effort multipli)
+        if any(m["segment_id"] == seg_id for m in medals):
+            continue
         rank = next((i+1 for i, (t, _) in enumerate(ranked) if t >= best_for_activity), len(ranked))
         if rank <= 3:
             medals.append({
