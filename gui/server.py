@@ -1755,6 +1755,119 @@ Sii conciso ma preciso, usa dati numerici quando possibile."""
 
 
 # ------------------------------------------------------------------ #
+# Stats settimanali / mensili
+# ------------------------------------------------------------------ #
+
+@app.route("/api/stats/performance")
+def api_stats_performance():
+    """
+    Restituisce statistiche aggregate settimanali e mensili per tutte le attività.
+    
+    Response:
+    {
+      "weekly":  [ { "label": "2024-W12", "start": "2024-03-18", "km": 120.5, "time_s": 14400,
+                     "calories": 1800, "elevation_m": 900, "activities": 3, "avg_watts": 180 }, ... ],
+      "monthly": [ { "label": "2024-03",  "start": "2024-03-01", "km": 450.0, ... }, ... ],
+      "totals":  { "km": 1234.5, "time_s": 99000, "calories": 15000, "elevation_m": 12000, "activities": 42 }
+    }
+    """
+    from collections import defaultdict
+    import datetime
+
+    conn = get_cache()._conn
+    rows = conn.execute(
+        """SELECT activity_date, total_distance_m, moving_time_s,
+                  calories, total_elevation_m, avg_watts
+           FROM activities
+           WHERE activity_date IS NOT NULL
+           ORDER BY activity_date ASC"""
+    ).fetchall()
+
+    def _week_label(d):
+        """ISO week string es. '2024-W12'"""
+        iso = d.isocalendar()
+        return f"{iso[0]}-W{iso[1]:02d}"
+
+    def _week_start(d):
+        """Lunedì della settimana"""
+        return (d - datetime.timedelta(days=d.weekday())).strftime("%Y-%m-%d")
+
+    def _month_label(d):
+        return d.strftime("%Y-%m")
+
+    def _month_start(d):
+        return d.strftime("%Y-%m-01")
+
+    weekly  = defaultdict(lambda: {"km": 0.0, "time_s": 0, "calories": 0,
+                                    "elevation_m": 0.0, "activities": 0,
+                                    "watts_sum": 0.0, "watts_count": 0,
+                                    "start": None, "label": None})
+    monthly = defaultdict(lambda: {"km": 0.0, "time_s": 0, "calories": 0,
+                                    "elevation_m": 0.0, "activities": 0,
+                                    "watts_sum": 0.0, "watts_count": 0,
+                                    "start": None, "label": None})
+
+    totals = {"km": 0.0, "time_s": 0, "calories": 0, "elevation_m": 0.0, "activities": 0}
+
+    for r in rows:
+        try:
+            d = datetime.datetime.fromisoformat(r["activity_date"]).date()
+        except Exception:
+            continue
+
+        dist_km  = (r["total_distance_m"] or 0.0) / 1000.0
+        time_s   = int(r["moving_time_s"] or 0)
+        cals     = int(r["calories"] or 0)
+        elev     = float(r["total_elevation_m"] or 0.0)
+        watts    = float(r["avg_watts"]) if r["avg_watts"] else None
+
+        wk = _week_label(d)
+        mo = _month_label(d)
+
+        for bucket, key in [(weekly, wk), (monthly, mo)]:
+            b = bucket[key]
+            b["km"]          += dist_km
+            b["time_s"]      += time_s
+            b["calories"]    += cals
+            b["elevation_m"] += elev
+            b["activities"]  += 1
+            if watts:
+                b["watts_sum"]   += watts
+                b["watts_count"] += 1
+            if b["start"] is None:
+                b["label"] = key
+                b["start"] = _week_start(d) if wk == key else _month_start(d)
+
+        totals["km"]          += dist_km
+        totals["time_s"]      += time_s
+        totals["calories"]    += cals
+        totals["elevation_m"] += elev
+        totals["activities"]  += 1
+
+    def _finalize(bucket):
+        out = []
+        for key, b in sorted(bucket.items()):
+            avg_w = round(b["watts_sum"] / b["watts_count"]) if b["watts_count"] else None
+            out.append({
+                "label":       key,
+                "start":       b["start"],
+                "km":          round(b["km"], 1),
+                "time_s":      b["time_s"],
+                "calories":    b["calories"],
+                "elevation_m": round(b["elevation_m"]),
+                "activities":  b["activities"],
+                "avg_watts":   avg_w,
+            })
+        return out
+
+    return jsonify({
+        "weekly":  _finalize(weekly),
+        "monthly": _finalize(monthly),
+        "totals":  {k: round(v, 1) if isinstance(v, float) else v for k, v in totals.items()},
+    })
+
+
+# ------------------------------------------------------------------ #
 # Avvio
 # ------------------------------------------------------------------ #
 

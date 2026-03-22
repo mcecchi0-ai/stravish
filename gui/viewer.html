@@ -245,6 +245,37 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+/* STATS MODAL */
+#stats-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2000;align-items:center;justify-content:center}
+#stats-modal.open{display:flex}
+#stats-box{background:var(--surface);border:1px solid var(--border);border-radius:14px;width:860px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
+#stats-header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+#stats-header h3{flex:1;font-size:16px;font-weight:700;color:var(--text)}
+.stats-period-tabs{display:flex;gap:4px;background:var(--bg);border-radius:8px;padding:3px}
+.stats-tab{padding:5px 16px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text2);border:none;background:transparent;transition:all .15s}
+.stats-tab.active{background:var(--orange);color:white}
+#stats-body{flex:1;overflow-y:auto;padding:18px 20px;display:flex;flex-direction:column;gap:18px}
+.stats-totals-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.stats-kpi{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.stats-kpi .kpi-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text2)}
+.stats-kpi .kpi-value{font-size:22px;font-weight:800;color:var(--text);line-height:1.1}
+.stats-kpi .kpi-unit{font-size:11px;color:var(--text2);margin-top:1px}
+.stats-kpi.highlight .kpi-value{color:var(--orange)}
+.stats-chart-section{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px}
+.stats-chart-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--text2);margin-bottom:12px}
+.stats-chart-outer{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+.stats-chart-outer::-webkit-scrollbar{height:4px}
+.stats-chart-outer::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.stats-chart-wrap{position:relative;height:180px;min-width:100%}
+.stats-table-wrap{overflow-x:auto;margin-top:8px}
+.stats-table{width:100%;border-collapse:collapse;font-size:12px}
+.stats-table th{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);padding:6px 10px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+.stats-table th:first-child{text-align:left}
+.stats-table td{padding:7px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--text);white-space:nowrap}
+.stats-table td:first-child{text-align:left;font-weight:600;color:var(--text)}
+.stats-table tr:hover td{background:rgba(255,255,255,.03)}
+.stats-table tr.stats-row-best td{color:var(--orange)}
+.stats-empty{text-align:center;color:var(--text2);padding:40px;font-size:13px}
 </style>
 </head>
 <body>
@@ -254,6 +285,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <span id="db-status" data-i18n="app.connecting"></span>
   <div class="spacer"></div>
   <button class="btn sec" id="btn-sync-strava" data-i18n="btn.syncStrava"></button>
+  <button class="btn sec" id="btn-stats" title="Statistiche settimanali e mensili">📊 Stats</button>
   <button class="btn sec" id="btn-import" data-i18n="btn.import"></button>
   <button class="btn sec settings-btn" id="btn-settings">⚙ <span id="strava-auth-dot" class="auth-dot"></span></button>
 </div>
@@ -300,6 +332,23 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div id="right-body"></div>
   </div>
 
+</div>
+
+<!-- STATS MODAL -->
+<div id="stats-modal">
+  <div id="stats-box">
+    <div id="stats-header">
+      <h3>📊 Statistiche Prestazioni</h3>
+      <div class="stats-period-tabs">
+        <button class="stats-tab active" data-period="weekly">Settimanale</button>
+        <button class="stats-tab" data-period="monthly">Mensile</button>
+      </div>
+      <button class="close-btn" id="stats-close" style="margin-left:10px">✕</button>
+    </div>
+    <div id="stats-body">
+      <div class="stats-empty">⏳ Caricamento statistiche...</div>
+    </div>
+  </div>
 </div>
 
 <div id="settings-modal">
@@ -1961,6 +2010,286 @@ function updateSyncCount(){
   document.getElementById('sync-count').innerHTML=
     checked>0?t('sync.toDownload',{count:checked,imported:imported,total:stravaActivities.length})
     :t('sync.alreadyImported',{imported:imported,total:stravaActivities.length});
+}
+
+// ── STATS MODAL ───────────────────────────────────────────────────
+let _statsData = null;
+let _statsPeriod = 'weekly';
+let _statsCharts = {};
+
+document.getElementById('btn-stats').addEventListener('click', openStatsModal);
+document.getElementById('stats-close').addEventListener('click', closeStatsModal);
+document.getElementById('stats-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('stats-modal')) closeStatsModal();
+});
+document.querySelectorAll('.stats-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.stats-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    _statsPeriod = tab.dataset.period;
+    if (_statsData) renderStats(_statsData);
+  });
+});
+
+function openStatsModal() {
+  document.getElementById('stats-modal').classList.add('open');
+  if (!_statsData) fetchStats();
+  else renderStats(_statsData);
+}
+function closeStatsModal() {
+  document.getElementById('stats-modal').classList.remove('open');
+}
+
+async function fetchStats() {
+  document.getElementById('stats-body').innerHTML = '<div class="stats-empty">⏳ Caricamento statistiche...</div>';
+  try {
+    const res = await fetch('/api/stats/performance');
+    _statsData = await res.json();
+    renderStats(_statsData);
+  } catch(e) {
+    document.getElementById('stats-body').innerHTML = '<div class="stats-empty">❌ Errore caricamento statistiche</div>';
+  }
+}
+
+function _fmtTime(s) {
+  if (!s) return '0h 00m';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h > 0 ? `${h}h ${String(m).padStart(2,'0')}m` : `${m}m`;
+}
+
+function renderStats(data) {
+  // Destroy previous charts
+  Object.values(_statsCharts).forEach(c => { try { c.destroy(); } catch(e) {} });
+  _statsCharts = {};
+
+  const rows = _statsPeriod === 'weekly' ? data.weekly : data.monthly;
+  const totals = data.totals;
+
+  // Show ALL periods — scroll handles overflow
+  const recent = rows;
+  const period = _statsPeriod;
+
+  // --- KPI cards ---
+  const kpiHtml = `
+    <div class="stats-totals-grid">
+      <div class="stats-kpi highlight">
+        <div class="kpi-label">Distanza Totale</div>
+        <div class="kpi-value">${(totals.km || 0).toFixed(0)}</div>
+        <div class="kpi-unit">km totali · ${totals.activities} uscite</div>
+      </div>
+      <div class="stats-kpi">
+        <div class="kpi-label">Tempo in Sella</div>
+        <div class="kpi-value">${_fmtTime(totals.time_s)}</div>
+        <div class="kpi-unit">tempo di movimento</div>
+      </div>
+      <div class="stats-kpi">
+        <div class="kpi-label">Calorie</div>
+        <div class="kpi-value">${(totals.calories || 0).toLocaleString('it')}</div>
+        <div class="kpi-unit">kcal totali</div>
+      </div>
+      <div class="stats-kpi">
+        <div class="kpi-label">Dislivello</div>
+        <div class="kpi-value">${(totals.elevation_m || 0).toLocaleString('it')}</div>
+        <div class="kpi-unit">metri totali</div>
+      </div>
+      <div class="stats-kpi">
+        <div class="kpi-label">Media ${period === 'weekly' ? 'Sett.' : 'Mese'}</div>
+        <div class="kpi-value">${rows.length > 0 ? (totals.km / rows.length).toFixed(0) : 0}</div>
+        <div class="kpi-unit">km / ${period === 'weekly' ? 'settimana' : 'mese'}</div>
+      </div>
+    </div>`;
+
+  // --- Chart IDs ---
+  const kmChartId  = 'stats-chart-km-'   + Date.now();
+  const timeChartId = 'stats-chart-time-' + Date.now();
+  const calChartId  = 'stats-chart-cal-'  + Date.now();
+
+  // --- Chart helpers ---
+  const BAR_MIN_PX = 28;  // larghezza minima per colonna — oltre scatta lo scroll
+  const n = recent.length;
+  const dynWidth = `max(100%, ${n * BAR_MIN_PX}px)`;
+
+  const chartCfg = (id, label) => `
+    <div class="stats-chart-section">
+      <div class="stats-chart-title">${label}</div>
+      <div class="stats-chart-outer">
+        <div class="stats-chart-wrap" style="width:${dynWidth}">
+          <canvas id="${id}"></canvas>
+        </div>
+      </div>
+    </div>`;
+
+  // --- Labels ---
+  const labels = recent.map(r => {
+    if (period === 'weekly') {
+      // Formato W34_22
+      const parts = r.label.split('-W');
+      const yy = String(parts[0]).slice(-2);
+      const ww = String(parts[1]).padStart(2, '0');
+      return `W${ww}_${yy}`;
+    } else {
+      const d = new Date(r.start);
+      return d.toLocaleDateString('it', {month: 'short', year: '2-digit'});
+    }
+  });
+
+  // --- Table (tutte le righe, ordine inverso) ---
+  const maxKm = Math.max(...rows.map(r => r.km), 1);
+  const tableRows = [...rows].reverse().map(r => {
+    const isBest = r.km === maxKm;
+    const d = new Date(r.start);
+    const lbl = period === 'weekly'
+      ? (() => { const p = r.label.split('-W'); return `W${String(p[1]).padStart(2,'0')}_${String(p[0]).slice(-2)} · ${d.toLocaleDateString('it',{day:'numeric',month:'short',year:'numeric'})}`; })()
+      : d.toLocaleDateString('it', {month: 'long', year: 'numeric'});
+    return `<tr class="${isBest ? 'stats-row-best' : ''}">
+      <td>${lbl}${isBest ? ' 🏆' : ''}</td>
+      <td>${r.km.toFixed(1)} km</td>
+      <td>${_fmtTime(r.time_s)}</td>
+      <td>${r.elevation_m.toLocaleString('it')} m</td>
+      <td>${r.calories ? r.calories.toLocaleString('it') + ' kcal' : '—'}</td>
+      <td>${r.avg_watts ? r.avg_watts + ' W' : '—'}</td>
+      <td>${r.activities}</td>
+    </tr>`;
+  }).join('');
+
+  const tableHtml = `
+    <div class="stats-chart-section">
+      <div class="stats-chart-title">Dettaglio per ${period === 'weekly' ? 'settimana' : 'mese'}</div>
+      <div class="stats-table-wrap">
+        <table class="stats-table">
+          <thead>
+            <tr>
+              <th style="text-align:left">Periodo</th>
+              <th>Distanza</th><th>Tempo</th><th>Dislivello</th>
+              <th>Calorie</th><th>Avg Watt</th><th>Uscite</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows || '<tr><td colspan="7" style="text-align:center;color:var(--text2);padding:20px">Nessun dato</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+  document.getElementById('stats-body').innerHTML =
+    kpiHtml +
+    chartCfg(kmChartId, '📍 Km Percorsi', null, '#fc4c02', 'km') +
+    chartCfg(timeChartId, '⏱ Tempo in Sella', null, '#5b8dee', 'h') +
+    chartCfg(calChartId, '🔥 Calorie & Dislivello', null, '#4caf50', 'kcal') +
+    tableHtml;
+
+  // Render charts after DOM update
+  setTimeout(() => {
+    const chartDefaults = {
+      responsive: false,        // il canvas ha già la larghezza giusta, non ridimensionare
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: {} } },
+      scales: {
+        x: { ticks: { color: '#8b90b0', font: { size: 10 }, maxRotation: 0, maxTicksLimit: 20 }, grid: { color: 'rgba(255,255,255,.05)' } },
+        y: { ticks: { color: '#8b90b0', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' }, beginAtZero: true }
+      }
+    };
+
+    // Dimensiona ogni canvas alla larghezza reale del suo wrapper
+    document.querySelectorAll('.stats-chart-wrap').forEach(wrap => {
+      const canvas = wrap.querySelector('canvas');
+      if (canvas) {
+        canvas.width  = wrap.offsetWidth  || wrap.scrollWidth;
+        canvas.height = 180;
+      }
+    });
+
+    // KM chart
+    const kmCtx = document.getElementById(kmChartId);
+    if (kmCtx) {
+      _statsCharts.km = new Chart(kmCtx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            data: recent.map(r => r.km),
+            backgroundColor: recent.map(r => r.km === maxKm ? 'rgba(255,215,0,.85)' : 'rgba(252,76,2,.75)'),
+            borderRadius: 4, borderSkipped: false,
+          }]
+        },
+        options: {
+          ...chartDefaults,
+          plugins: { ...chartDefaults.plugins, tooltip: { callbacks: {
+            label: ctx => ` ${ctx.parsed.y.toFixed(1)} km`
+          }}}
+        }
+      });
+    }
+
+    // Time chart
+    const timeCtx = document.getElementById(timeChartId);
+    if (timeCtx) {
+      _statsCharts.time = new Chart(timeCtx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            data: recent.map(r => +(r.time_s / 3600).toFixed(2)),
+            backgroundColor: 'rgba(91,141,238,.75)',
+            borderRadius: 4, borderSkipped: false,
+          }]
+        },
+        options: {
+          ...chartDefaults,
+          plugins: { ...chartDefaults.plugins, tooltip: { callbacks: {
+            label: ctx => ` ${_fmtTime(Math.round(ctx.parsed.y * 3600))}`
+          }}}
+        }
+      });
+    }
+
+    // Calories + elevation combo chart
+    const calCtx = document.getElementById(calChartId);
+    if (calCtx) {
+      _statsCharts.cal = new Chart(calCtx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Calorie',
+              data: recent.map(r => r.calories || 0),
+              backgroundColor: 'rgba(76,175,80,.75)',
+              borderRadius: 4, borderSkipped: false,
+              yAxisID: 'y',
+            },
+            {
+              label: 'Dislivello',
+              data: recent.map(r => r.elevation_m || 0),
+              type: 'line',
+              borderColor: 'rgba(255,193,7,.85)',
+              backgroundColor: 'rgba(255,193,7,.1)',
+              borderWidth: 2,
+              pointRadius: 3,
+              fill: true,
+              tension: 0.35,
+              yAxisID: 'y2',
+            }
+          ]
+        },
+        options: {
+          ...chartDefaults,
+          plugins: {
+            legend: { display: true, labels: { color: '#8b90b0', font: { size: 10 }, boxWidth: 10 } },
+            tooltip: { callbacks: {
+              label: ctx => ctx.datasetIndex === 0
+                ? ` ${ctx.parsed.y.toLocaleString('it')} kcal`
+                : ` ${ctx.parsed.y.toLocaleString('it')} m`
+            }}
+          },
+          scales: {
+            x: chartDefaults.scales.x,
+            y: { ...chartDefaults.scales.y, position: 'left' },
+            y2: { ...chartDefaults.scales.y, position: 'right', grid: { drawOnChartArea: false } }
+          }
+        }
+      });
+    }
+  }, 50);
 }
 
 // ── UTILS ─────────────────────────────────────────────────────────
