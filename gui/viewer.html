@@ -416,7 +416,6 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
           <input type="password" id="cfg-strava-client-secret" placeholder="••••••••••">
         </div>
         <div class="strava-auth-actions">
-          <button class="btn sec" id="strava-save-creds" style="font-size:11px;padding:4px 12px" data-i18n="btn.save"></button>
           <button class="btn sec" id="strava-refresh-token" style="font-size:11px;padding:4px 12px" data-i18n="strava.refreshToken"></button>
           <span id="strava-auth-msg" class="strava-auth-msg"></span>
         </div>
@@ -692,28 +691,6 @@ function _renderStravaAuthSettings() {
   }
 }
 
-// Save Strava credentials
-document.getElementById('strava-save-creds').addEventListener('click', async () => {
-  const msgEl = document.getElementById('strava-auth-msg');
-  const clientId = document.getElementById('cfg-strava-client-id').value.trim();
-  const clientSecret = document.getElementById('cfg-strava-client-secret').value.trim();
-  if (!clientId || !clientSecret) {
-    msgEl.innerHTML = `<span style="color:var(--orange)">${t('strava.credentialsFailed', {error: 'client_id / client_secret'})}</span>`;
-    return;
-  }
-  try {
-    const res = await api('/api/strava/auth-config', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({client_id: clientId, client_secret: clientSecret})
-    });
-    msgEl.innerHTML = `<span style="color:var(--green)">${t('strava.credentialsSaved')}</span>`;
-    setTimeout(() => msgEl.textContent = '', 3000);
-    await loadStravaAuthStatus();
-  } catch(e) {
-    msgEl.innerHTML = `<span style="color:var(--orange)">${t('strava.credentialsFailed', {error: e.message})}</span>`;
-  }
-});
-
 // Refresh Strava token
 document.getElementById('strava-refresh-token').addEventListener('click', async () => {
   const btn = document.getElementById('strava-refresh-token');
@@ -745,6 +722,16 @@ document.getElementById('settings-modal').addEventListener('click', e => {
     document.getElementById('settings-modal').classList.remove('open');
 });
 document.getElementById('settings-save').addEventListener('click', async () => {
+  const stravaMsgEl = document.getElementById('strava-auth-msg');
+  if (stravaMsgEl) stravaMsgEl.textContent = '';
+  const stravaClientId = document.getElementById('cfg-strava-client-id').value.trim();
+  const stravaClientSecret = document.getElementById('cfg-strava-client-secret').value.trim();
+  if ((stravaClientId || stravaClientSecret) && (!stravaClientId || !stravaClientSecret)) {
+    if (stravaMsgEl) {
+      stravaMsgEl.innerHTML = `<span style="color:var(--orange)">${t('strava.credentialsFailed', {error: 'client_id / client_secret'})}</span>`;
+    }
+    return;
+  }
   const payload = {
     weight_kg: document.getElementById('cfg-weight').value || '75',
     bike_kg:   document.getElementById('cfg-bike').value   || '10',
@@ -762,6 +749,17 @@ document.getElementById('settings-save').addEventListener('click', async () => {
     });
     _aiActiveModel = aiCfg.model;
     _aiSavedAuth[aiCfg.provider] = aiCfg.auth;
+  }
+  if (stravaClientId || stravaClientSecret) {
+    await api('/api/strava/auth-config', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({client_id: stravaClientId, client_secret: stravaClientSecret})
+    });
+    if (stravaMsgEl) {
+      stravaMsgEl.innerHTML = `<span style="color:var(--green)">${t('strava.credentialsSaved')}</span>`;
+      setTimeout(() => stravaMsgEl.textContent = '', 3000);
+    }
+    await loadStravaAuthStatus();
   }
   // Ricarica settings dal server per avere tutto in sync
   try { appSettings = await api('/api/settings'); } catch(e) {}
